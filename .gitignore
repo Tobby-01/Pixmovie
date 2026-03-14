@@ -8,3 +8,8 @@ data/db.json
 cd
 git
 main
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
