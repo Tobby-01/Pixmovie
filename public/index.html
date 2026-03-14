@@ -18,8 +18,11 @@
       <div class="brand">PixMovie</div>
       <nav class="nav-links">
         <a href="index.html">Library</a>
+        <a href="#seriesSection">Series</a>
+        <a href="people.html">Creators</a>
         <a id="uploadLink" href="upload.html">Upload</a>
         <a id="profileLink" href="profile.html">Profile</a>
+        <a href="settings.html">Settings</a>
       </nav>
       <div class="auth-actions">
         <a id="loginLink" class="btn ghost" href="login.html">Log In</a>
@@ -30,29 +33,51 @@
     </header>
 
     <main class="container">
-      <section class="hero">
-        <div>
-          <h1>Stream. Seed. Share.</h1>
-          <p>
-            PixMovie turns every upload into a community-powered stream. Watch instantly with
-            peer-to-peer delivery or just stream from the server.
-          </p>
-          <button class="btn sun" onclick="document.getElementById('library').scrollIntoView()">
-            Browse the Library
-          </button>
-        </div>
-        <div class="hero-card">
-          <h3>How it works</h3>
-          <p>
-            Upload a movie, we seed it with WebTorrent, and viewers choose server streaming or
+      <section id="heroBanner" class="hero-banner">
+        <div class="hero-overlay"></div>
+        <div class="hero-content">
+          <div class="hero-tag">Built by Pixxel</div>
+          <h1 id="heroTitle">Stream. Seed. Share.</h1>
+          <p id="heroMeta">
+            PixMovie turns every upload into a community-powered stream. Watch instantly or go
             swarm mode to reduce bandwidth.
           </p>
-          <div class="badge">Powered by WebTorrent</div>
+          <div class="hero-actions">
+            <button id="heroWatchBtn" class="btn sun" type="button">Watch now</button>
+            <button id="heroWatchlistBtn" class="btn ghost" type="button">Add to Watchlist</button>
+          </div>
         </div>
       </section>
 
+      <section id="continueSection" class="row-section hidden">
+        <div class="row-header">
+          <h2>Continue Watching</h2>
+          <span class="row-subtitle">Pick up right where you left off.</span>
+        </div>
+        <div id="continueRow" class="row-scroll"></div>
+      </section>
+
+      <section id="watchlistSection" class="row-section hidden">
+        <div class="row-header">
+          <h2>Your Watchlist</h2>
+          <span class="row-subtitle">Saved for your next binge.</span>
+        </div>
+        <div id="watchlistRow" class="row-scroll"></div>
+      </section>
+
+      <section id="seriesSection" class="row-section">
+        <div class="row-header">
+          <h2>Series</h2>
+          <span class="row-subtitle">Seasoned stories ready to stream.</span>
+        </div>
+        <div id="seriesRow" class="row-scroll"></div>
+      </section>
+
       <section id="library" class="panel">
-        <h2>Public Library</h2>
+        <div class="row-header">
+          <h2>Public Library</h2>
+          <span class="row-subtitle">Discover new uploads and community favorites.</span>
+        </div>
         <input id="searchInput" class="input" placeholder="Search by title..." />
         <div id="movieGrid" class="movie-grid"></div>
       </section>

@@ -121,6 +121,27 @@ router.get("/mine", auth, async (req, res) => {
   }
 });
 
+router.get("/", async (req, res) => {
+  try {
+    const series = await Series.find({}).sort({ createdAt: -1 });
+    return res.json(series);
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load series" });
+  }
+});
+
+router.get("/:id", async (req, res) => {
+  try {
+    const series = await Series.findById(req.params.id);
+    if (!series) {
+      return res.status(404).json({ message: "Series not found" });
+    }
+    return res.json(series);
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load series" });
+  }
+});
+
 router.put("/:id/header", auth, seriesHeaderUpload.single("header"), async (req, res) => {
   try {
     const series = await Series.findById(req.params.id);

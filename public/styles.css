@@ -19,9 +19,9 @@ body {
   margin: 0;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
   color: var(--ink);
-  background: radial-gradient(circle at top left, #fef3c7, transparent 55%),
-    radial-gradient(circle at 10% 80%, #ccfbf1, transparent 45%),
-    linear-gradient(120deg, #f8fafc, #f1f5f9);
+  background: radial-gradient(circle at top left, #fff3d6, transparent 55%),
+    radial-gradient(circle at 20% 85%, #d1fae5, transparent 45%),
+    linear-gradient(120deg, #f8fafc, #eef2f7);
   min-height: 100vh;
 }
 
@@ -56,6 +56,7 @@ body {
   text-decoration: none;
   color: var(--slate);
   font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .nav-links a:hover {
@@ -180,6 +181,166 @@ body {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.hero-banner {
+  position: relative;
+  border-radius: 28px;
+  min-height: 320px;
+  padding: 36px;
+  background: linear-gradient(120deg, #0f172a, #1f2937);
+  color: #f8fafc;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  margin-top: 20px;
+  background-size: cover;
+  background-position: center;
+}
+
+.hero-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.85), rgba(15, 23, 42, 0.2));
+  pointer-events: none;
+}
+
+.hero-banner .hero-overlay {
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(2px);
+}
+
+.hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 520px;
+  display: grid;
+  gap: 14px;
+}
+
+.hero-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fef3c7;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.hero-banner h1 {
+  margin: 0;
+  font-family: "Bebas Neue", sans-serif;
+  font-size: clamp(36px, 6vw, 70px);
+  letter-spacing: 1.5px;
+}
+
+.hero-banner p {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.row-section {
+  margin-top: 28px;
+}
+
+.row-section.hidden {
+  display: none;
+}
+
+.row-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.row-header h2 {
+  margin: 0;
+  font-size: 22px;
+  color: var(--steel);
+}
+
+.row-subtitle {
+  color: var(--slate);
+  font-size: 13px;
+}
+
+.row-scroll {
+  margin-top: 14px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(230px, 1fr);
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 10px;
+}
+
+.row-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.row-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.6);
+  border-radius: 999px;
+}
+
+.poster-card {
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid var(--mist);
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 160px auto;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.poster-image {
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+  background-position: center;
+}
+
+.poster-info {
+  padding: 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.poster-info h4 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--steel);
+}
+
+.poster-progress {
+  height: 6px;
+  background: #e2e8f0;
+}
+
+.poster-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--sun), var(--teal));
+  width: 0%;
+}
+
+.series-card-mini .poster-image {
+  height: 140px;
 }
 
 .movie-card {
@@ -308,6 +469,11 @@ body {
   background-size: cover;
   background-position: center;
   border: 1px solid var(--mist);
+}
+
+#seriesBanner {
+  width: 220px;
+  height: 120px;
 }
 
 .series-actions {
@@ -550,6 +716,12 @@ body {
   margin: 10px 0 14px;
 }
 
+.player-cta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .pill-group {
   display: inline-flex;
   gap: 8px;
@@ -643,6 +815,124 @@ body {
   display: block;
 }
 
+.ratings-panel {
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid var(--mist);
+  background: #f8fafc;
+  display: grid;
+  gap: 12px;
+}
+
+.ratings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rating-form {
+  display: grid;
+  gap: 10px;
+}
+
+.rating-stars {
+  display: flex;
+  gap: 6px;
+}
+
+.rating-stars .star {
+  border: none;
+  background: #e2e8f0;
+  color: #475569;
+  padding: 6px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.rating-stars .star.active {
+  background: rgba(245, 158, 11, 0.2);
+  color: #d97706;
+}
+
+.rating-list {
+  display: grid;
+  gap: 10px;
+}
+
+.rating-card {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--mist);
+  background: #ffffff;
+  display: grid;
+  gap: 6px;
+}
+
+.rating-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rating-name {
+  font-weight: 600;
+  color: var(--steel);
+}
+
+.rating-score {
+  font-weight: 600;
+  color: var(--sun);
+}
+
+.rating-comment {
+  color: var(--slate);
+  font-size: 14px;
+}
+
+.user-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.user-card {
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid var(--mist);
+  background: #ffffff;
+  display: grid;
+  gap: 12px;
+}
+
+.user-card .avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+
+.user-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.profile-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.stat-mini {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  font-size: 13px;
+}
+
 @media (max-width: 720px) {
   .topbar {
     flex-direction: column;
@@ -660,5 +950,14 @@ body {
 
   .player-banner {
     height: 140px;
+  }
+
+  .hero-banner {
+    padding: 24px;
+    min-height: 260px;
+  }
+
+  .row-scroll {
+    grid-auto-columns: minmax(200px, 1fr);
   }
 }

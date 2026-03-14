@@ -8,11 +8,12 @@ function ensureDir(dir) {
   }
 }
 
-function transcodeToHls(inputPath, outputDir) {
+function transcodeToHls(inputPath, outputDir, options = {}) {
   return new Promise((resolve, reject) => {
     ensureDir(outputDir);
     const outputPath = path.join(outputDir, "index.m3u8");
     const segmentPath = path.join(outputDir, "segment_%03d.ts");
+    const lowData = Boolean(options.lowData);
 
     const args = [
       "-y",
@@ -23,11 +24,12 @@ function transcodeToHls(inputPath, outputDir) {
       "-preset",
       "veryfast",
       "-crf",
-      "23",
+      lowData ? "28" : "23",
+      ...(lowData ? ["-vf", "scale=-2:480"] : []),
       "-c:a",
       "aac",
       "-b:a",
-      "128k",
+      lowData ? "96k" : "128k",
       "-f",
       "hls",
       "-hls_time",

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PixMovie Login</title>
+    <title>PixMovie Series</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -32,34 +32,27 @@
       </div>
     </header>
 
-    <main class="container auth-page">
-      <div class="auth-card">
-        <h1>Welcome back</h1>
-        <p class="movie-meta">Stream instantly with no heavy downloads. Log in to continue.</p>
-        <form id="loginForm" class="auth-form">
-          <input class="input" type="email" name="email" placeholder="Email" required />
-          <input class="input" type="password" name="password" placeholder="Password" required />
-          <button class="btn sun" type="submit">Log In</button>
-        </form>
-        <button id="guestStreamBtn" class="btn ghost small" type="button">
-          Stream as visitor
-        </button>
-        <p id="loginMessage" class="movie-meta"></p>
-        <p class="movie-meta">
-          New here? <a class="link" href="signup.html">Create an account</a>
-        </p>
-      </div>
-      <div class="auth-side">
-        <h2>Built by Pixxel</h2>
-        <p>
-          Upload series, stream instantly, and keep your library alive with swarm mode.
-        </p>
-        <div class="badge">Secure sessions</div>
-      </div>
+    <main class="container">
+      <section id="seriesHero" class="panel">
+        <div class="profile-header">
+          <div id="seriesBanner" class="series-banner"></div>
+          <div>
+            <h2 id="seriesTitle">Series</h2>
+            <p id="seriesMeta" class="movie-meta"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Episodes</h2>
+        <div id="seriesEpisodes" class="series-grid"></div>
+      </section>
     </main>
+
+    <div class="footer">Binge by season and keep the story rolling.</div>
 
     <script src="config.js"></script>
     <script src="shared.js"></script>
-    <script src="login.js"></script>
+    <script src="series.js"></script>
   </body>
 </html>

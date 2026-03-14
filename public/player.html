@@ -18,8 +18,11 @@
       <div class="brand">PixMovie</div>
       <nav class="nav-links">
         <a href="index.html">Library</a>
+        <a href="index.html#seriesSection">Series</a>
+        <a href="people.html">Creators</a>
         <a id="uploadLink" href="upload.html">Upload</a>
         <a id="profileLink" href="profile.html">Profile</a>
+        <a href="settings.html">Settings</a>
       </nav>
     </header>
 
@@ -33,10 +36,14 @@
         <div class="pill-group">
           <button id="streamBtn" class="pill active" type="button">Stream</button>
           <button id="swarmBtn" class="pill" type="button">Swarm</button>
+          <button id="lowDataBtn" class="pill" type="button">Low Data</button>
         </div>
-        <button id="fullscreenBtn" class="icon-btn" type="button" title="Full screen">
-          Full
-        </button>
+        <div class="player-cta">
+          <button id="watchlistBtn" class="btn ghost small" type="button">Add to Watchlist</button>
+          <button id="fullscreenBtn" class="icon-btn" type="button" title="Full screen">
+            Full
+          </button>
+        </div>
       </div>
       <video id="video" controls></video>
       <div class="progress">
@@ -53,6 +60,10 @@
           <span>Peers</span>
         </div>
         <div class="stat">
+          <h3 id="statLive">0</h3>
+          <span>Watching Now</span>
+        </div>
+        <div class="stat">
           <h3 id="statSpeed">0 MB/s</h3>
           <span>Download Speed</span>
         </div>
@@ -60,6 +71,25 @@
           <h3 id="statProgress">0%</h3>
           <span>Progress</span>
         </div>
+      </div>
+
+      <div class="ratings-panel">
+        <div class="ratings-header">
+          <h3>Ratings & Feedback</h3>
+          <div id="ratingSummary" class="badge">No ratings</div>
+        </div>
+        <div id="ratingForm" class="rating-form">
+          <div id="ratingStars" class="rating-stars"></div>
+          <textarea
+            id="ratingComment"
+            class="input"
+            rows="3"
+            placeholder="Share feedback (optional)"
+          ></textarea>
+          <button id="ratingSubmit" class="btn sun" type="button">Submit Rating</button>
+          <div id="ratingMessage" class="movie-meta"></div>
+        </div>
+        <div id="ratingList" class="rating-list"></div>
       </div>
     </div>
 

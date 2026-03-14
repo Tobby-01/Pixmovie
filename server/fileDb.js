@@ -52,6 +52,9 @@ function matchesFilter(doc, filter) {
       const re = new RegExp(value.$regex, flags);
       return re.test(String(doc[key] || ""));
     }
+    if (value && typeof value === "object" && Array.isArray(value.$in)) {
+      return value.$in.map(String).includes(String(doc[key]));
+    }
     return String(doc[key]) === String(value);
   });
 }
@@ -165,11 +168,18 @@ function createModel(kind) {
 
       if (kind === "users") {
         if (!doc.uploadedMovies) doc.uploadedMovies = [];
+        if (!doc.watchlist) doc.watchlist = [];
+        if (!doc.watchHistory) doc.watchHistory = [];
+        if (!doc.followers) doc.followers = [];
+        if (!doc.following) doc.following = [];
       }
 
       if (kind === "movies") {
         if (doc.views == null) doc.views = 0;
         if (!doc.uploadDate) doc.uploadDate = now;
+        if (!doc.ratings) doc.ratings = [];
+        if (doc.ratingAverage == null) doc.ratingAverage = 0;
+        if (doc.ratingCount == null) doc.ratingCount = 0;
       }
 
       db[kind].push(doc);

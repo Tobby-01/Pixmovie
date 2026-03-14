@@ -11,8 +11,12 @@ const { transcodeToHls } = require("../server/hls");
 const router = express.Router();
 
 const moviesDir = path.join(__dirname, "..", "movies");
+const headersDir = path.join(__dirname, "..", "public", "headers", "movies");
 if (!fs.existsSync(moviesDir)) {
   fs.mkdirSync(moviesDir, { recursive: true });
+}
+if (!fs.existsSync(headersDir)) {
+  fs.mkdirSync(headersDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -26,6 +30,26 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 2 * 1024 * 1024 * 1024 }
+});
+
+const headerStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, headersDir),
+  filename: (req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${req.user.id}_${Date.now()}_${safeName}`);
+  }
+});
+
+const headerUpload = multer({
+  storage: headerStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const lower = String(file.originalname || "").toLowerCase();
+    if (!/\.(png|jpe?g|webp|gif)$/.test(lower)) {
+      return cb(new Error("Header image must be JPG, PNG, WebP, or GIF."));
+    }
+    return cb(null, true);
+  }
 });
 
 const allowedExtensions = new Set([
@@ -43,6 +67,27 @@ const allowedExtensions = new Set([
 const playableExtensions = new Set([".mp4", ".webm", ".mov"]);
 const transcodeLocks = new Map();
 const hlsLocks = new Map();
+
+function getLiveMap(req) {
+  if (!req.app.locals.liveViews) {
+    req.app.locals.liveViews = new Map();
+  }
+  return req.app.locals.liveViews;
+}
+
+function cleanupLive(map) {
+  const now = Date.now();
+  for (const [movieId, viewers] of map.entries()) {
+    for (const [viewerId, lastSeen] of viewers.entries()) {
+      if (now - lastSeen > 45000) {
+        viewers.delete(viewerId);
+      }
+    }
+    if (!viewers.size) {
+      map.delete(movieId);
+    }
+  }
+}
 
 function safeUnlink(targetPath) {
   if (!targetPath) return;
@@ -214,7 +259,9 @@ router.get("/:id/hls", async (req, res) => {
       return res.status(404).json({ message: "File missing on server" });
     }
 
-    const hlsDir = path.join(moviesDir, "_hls", movie._id);
+    const lowData = req.query.low === "1";
+    const variant = lowData ? "low" : "standard";
+    const hlsDir = path.join(moviesDir, "_hls", movie._id, variant);
     const hlsIndex = path.join(hlsDir, "index.m3u8");
 
     if (fs.existsSync(hlsIndex)) {
@@ -224,7 +271,7 @@ router.get("/:id/hls", async (req, res) => {
     let lock = hlsLocks.get(hlsDir);
     if (!lock) {
       lock = (async () => {
-        await transcodeToHls(filePath, hlsDir);
+        await transcodeToHls(filePath, hlsDir, { lowData });
         return hlsIndex;
       })();
       hlsLocks.set(hlsDir, lock);
@@ -252,6 +299,121 @@ router.get("/:id", async (req, res) => {
     return res.json(movie);
   } catch (err) {
     return res.status(500).json({ message: "Failed to load movie" });
+  }
+});
+
+router.get("/:id/ratings", async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+    const ratings = Array.isArray(movie.ratings) ? movie.ratings : [];
+    const sorted = ratings
+      .slice()
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const userIds = [...new Set(sorted.map((item) => String(item.userId || "")))].filter(Boolean);
+    let users = [];
+    if (userIds.length) {
+      users = await User.find({ _id: { $in: userIds } });
+    }
+    const userMap = new Map((users || []).map((user) => [String(user._id), user]));
+    const enriched = sorted.map((item) => {
+      const user = userMap.get(String(item.userId || ""));
+      return {
+        userId: item.userId,
+        score: item.score,
+        comment: item.comment,
+        createdAt: item.createdAt,
+        user: user
+          ? { id: user._id, username: user.username, avatarUrl: user.avatarUrl || "" }
+          : null
+      };
+    });
+    return res.json({
+      ratingAverage: movie.ratingAverage || 0,
+      ratingCount: movie.ratingCount || ratings.length,
+      ratings: enriched.slice(0, 20)
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load ratings" });
+  }
+});
+
+router.get("/:id/live", async (req, res) => {
+  const map = getLiveMap(req);
+  cleanupLive(map);
+  const viewers = map.get(String(req.params.id));
+  return res.json({ count: viewers ? viewers.size : 0 });
+});
+
+router.post("/:id/live", async (req, res) => {
+  try {
+    const viewerId = String(req.body.viewerId || "").trim();
+    if (!viewerId) {
+      return res.status(400).json({ message: "viewerId is required" });
+    }
+    const map = getLiveMap(req);
+    cleanupLive(map);
+    const movieKey = String(req.params.id);
+    const viewers = map.get(movieKey) || new Map();
+    viewers.set(viewerId, Date.now());
+    map.set(movieKey, viewers);
+    return res.json({ count: viewers.size });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to update live viewers" });
+  }
+});
+
+router.post("/:id/ratings", auth, async (req, res) => {
+  try {
+    const score = Number(req.body.score || 0);
+    const comment = String(req.body.comment || "").trim();
+    if (!Number.isFinite(score) || score < 1 || score > 5) {
+      return res.status(400).json({ message: "Score must be between 1 and 5" });
+    }
+
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+
+    const ratings = Array.isArray(movie.ratings) ? movie.ratings : [];
+    const existing = ratings.find((entry) => String(entry.userId) === String(req.user.id));
+    const now = new Date().toISOString();
+
+    if (existing) {
+      existing.score = score;
+      existing.comment = comment.slice(0, 500);
+      existing.createdAt = now;
+    } else {
+      ratings.push({
+        userId: req.user.id,
+        score,
+        comment: comment.slice(0, 500),
+        createdAt: now
+      });
+    }
+
+    const total = ratings.reduce((sum, item) => sum + Number(item.score || 0), 0);
+    const avg = ratings.length ? total / ratings.length : 0;
+
+    if (typeof movie.save === "function") {
+      movie.ratings = ratings;
+      movie.ratingAverage = avg;
+      movie.ratingCount = ratings.length;
+      await movie.save();
+    } else {
+      await Movie.findByIdAndUpdate(
+        req.params.id,
+        { ratings, ratingAverage: avg, ratingCount: ratings.length },
+        { new: true }
+      );
+    }
+
+    return res.json({ ratingAverage: avg, ratingCount: ratings.length });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to save rating" });
   }
 });
 
@@ -347,6 +509,47 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
     return res.json(movie);
   } catch (err) {
     return res.status(500).json({ message: "Upload failed" });
+  }
+});
+
+router.put("/:id/header", auth, headerUpload.single("header"), async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+    if (String(movie.uploader) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Not allowed to update this movie" });
+    }
+    if (!req.file) {
+      return res.status(400).json({ message: "header image is required" });
+    }
+
+    if (movie.headerImage) {
+      const oldPath = path.join(
+        __dirname,
+        "..",
+        "public",
+        movie.headerImage.replace(/^\//, "")
+      );
+      safeUnlink(oldPath);
+    }
+
+    const nextHeader = `/headers/movies/${req.file.filename}`;
+    if (typeof movie.save === "function") {
+      movie.headerImage = nextHeader;
+      await movie.save();
+      return res.json(movie);
+    }
+
+    const updated = await Movie.findByIdAndUpdate(
+      req.params.id,
+      { headerImage: nextHeader },
+      { new: true }
+    );
+    return res.json(updated);
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to update movie header" });
   }
 });
 

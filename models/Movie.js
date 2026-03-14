@@ -27,7 +27,17 @@ if (useFileDb) {
       seriesId: { type: mongoose.Schema.Types.ObjectId, ref: "Series" },
       seriesTitle: { type: String, trim: true },
       seasonNumber: { type: Number },
-      episodeNumber: { type: Number }
+      episodeNumber: { type: Number },
+      ratings: [
+        {
+          userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+          score: { type: Number, min: 1, max: 5 },
+          comment: { type: String, trim: true, maxlength: 500 },
+          createdAt: { type: Date, default: Date.now }
+        }
+      ],
+      ratingAverage: { type: Number, default: 0 },
+      ratingCount: { type: Number, default: 0 }
     },
     { timestamps: true }
   );

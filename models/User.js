@@ -12,7 +12,20 @@ if (useFileDb) {
       email: { type: String, required: true, unique: true, trim: true, lowercase: true },
       passwordHash: { type: String, required: true },
       avatarUrl: { type: String, trim: true },
-      uploadedMovies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Movie" }]
+      bio: { type: String, trim: true, maxlength: 280 },
+      uploadedMovies: [{ type: mongoose.Schema.Types.ObjectId, ref: "Movie" }],
+      watchlist: [{ type: mongoose.Schema.Types.ObjectId, ref: "Movie" }],
+      watchHistory: [
+        {
+          movieId: { type: mongoose.Schema.Types.ObjectId, ref: "Movie" },
+          lastPosition: { type: Number, default: 0 },
+          duration: { type: Number, default: 0 },
+          progress: { type: Number, default: 0 },
+          updatedAt: { type: Date, default: Date.now }
+        }
+      ],
+      followers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+      following: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }]
     },
     { timestamps: true }
   );

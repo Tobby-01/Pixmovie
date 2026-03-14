@@ -1,9 +1,13 @@
 const profileAvatar = document.getElementById("profileAvatar");
 const profileName = document.getElementById("profileName");
 const profileEmail = document.getElementById("profileEmail");
+const profileFollowers = document.getElementById("profileFollowers");
+const profileFollowing = document.getElementById("profileFollowing");
 const profileForm = document.getElementById("profileForm");
 const profileMessage = document.getElementById("profileMessage");
 const profileMovies = document.getElementById("profileMovies");
+const profileWatchlist = document.getElementById("profileWatchlist");
+const profileBioInput = profileForm ? profileForm.querySelector('textarea[name="bio"]') : null;
 
 const statUploads = document.getElementById("statUploads");
 const statViews = document.getElementById("statViews");
@@ -33,6 +37,14 @@ function renderMovieCard(movie) {
   const card = document.createElement("div");
   card.className = "movie-card";
 
+  if (movie.headerImage) {
+    const banner = document.createElement("div");
+    banner.className = "series-banner";
+    banner.style.height = "120px";
+    banner.style.backgroundImage = `url("${movie.headerImage}")`;
+    card.appendChild(banner);
+  }
+
   const title = document.createElement("h4");
   title.textContent = formatEpisodeTitle(movie);
 
@@ -41,7 +53,7 @@ function renderMovieCard(movie) {
   if (movie.isEpisode) {
     const season = movie.seasonNumber || "?";
     const episode = movie.episodeNumber || "?";
-    meta.textContent = `Season ${season} · Episode ${episode}`;
+    meta.textContent = `Season ${season} - Episode ${episode}`;
   } else {
     meta.textContent = new Date(movie.uploadDate).toLocaleDateString();
   }
@@ -74,8 +86,83 @@ function renderMovieCard(movie) {
     }
   };
 
-  actions.append(watchButton, deleteButton);
+  const headerInput = document.createElement("input");
+  headerInput.type = "file";
+  headerInput.accept = "image/*";
+  headerInput.className = "hidden";
+
+  const headerBtn = document.createElement("button");
+  headerBtn.className = "btn ghost small";
+  headerBtn.type = "button";
+  headerBtn.textContent = movie.headerImage ? "Update Header" : "Add Header";
+  headerBtn.onclick = () => headerInput.click();
+
+  headerInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const formData = new FormData();
+      formData.append("header", file);
+      await apiFetch(`/movies/${movie._id}/header`, {
+        method: "PUT",
+        body: formData
+      });
+      await loadProfile();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      headerInput.value = "";
+    }
+  });
+
+  actions.append(watchButton, deleteButton, headerBtn, headerInput);
   card.append(title, meta, stats, actions);
+  return card;
+}
+
+function renderWatchlistCard(movie) {
+  const card = document.createElement("div");
+  card.className = "movie-card";
+
+  if (movie.headerImage) {
+    const banner = document.createElement("div");
+    banner.className = "series-banner";
+    banner.style.height = "120px";
+    banner.style.backgroundImage = `url("${movie.headerImage}")`;
+    card.appendChild(banner);
+  }
+
+  const title = document.createElement("h4");
+  title.textContent = formatEpisodeTitle(movie);
+
+  const meta = document.createElement("div");
+  meta.className = "movie-meta";
+  meta.textContent = movie.uploadDate ? new Date(movie.uploadDate).toLocaleDateString() : "";
+
+  const actions = document.createElement("div");
+  actions.className = "card-actions";
+
+  const watchButton = document.createElement("button");
+  watchButton.className = "btn";
+  watchButton.textContent = "Watch";
+  watchButton.onclick = () => {
+    window.location.href = `player.html?id=${movie._id}`;
+  };
+
+  const removeButton = document.createElement("button");
+  removeButton.className = "btn ghost";
+  removeButton.textContent = "Remove";
+  removeButton.onclick = async () => {
+    try {
+      await apiFetch(`/users/me/watchlist/${movie._id}`, { method: "DELETE" });
+      await loadWatchlist();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  actions.append(watchButton, removeButton);
+  card.append(title, meta, actions);
   return card;
 }
 
@@ -87,6 +174,15 @@ async function loadProfile() {
   profileName.textContent = user.username;
   profileEmail.textContent = user.email;
   profileAvatar.src = user.avatarUrl || "https://via.placeholder.com/96?text=PM";
+  if (profileBioInput) {
+    profileBioInput.value = user.bio || "";
+  }
+  if (profileFollowers) {
+    profileFollowers.textContent = `${user.followersCount || 0} followers`;
+  }
+  if (profileFollowing) {
+    profileFollowing.textContent = `${user.followingCount || 0} following`;
+  }
 
   profileMovies.innerHTML = "";
   if (!user.uploadedMovies.length) {
@@ -94,6 +190,21 @@ async function loadProfile() {
     return;
   }
   user.uploadedMovies.forEach((movie) => profileMovies.appendChild(renderMovieCard(movie)));
+}
+
+async function loadWatchlist() {
+  if (!profileWatchlist) return;
+  profileWatchlist.innerHTML = "";
+  try {
+    const list = await apiFetch("/users/me/watchlist");
+    if (!list.length) {
+      profileWatchlist.textContent = "No watchlist items yet.";
+      return;
+    }
+    list.forEach((movie) => profileWatchlist.appendChild(renderWatchlistCard(movie)));
+  } catch (err) {
+    profileWatchlist.textContent = "Unable to load watchlist.";
+  }
 }
 
 async function loadAnalytics() {
@@ -172,6 +283,7 @@ profileForm.addEventListener("submit", async (e) => {
     profileAvatar.src = user.avatarUrl || profileAvatar.src;
     profileMessage.textContent = "Profile updated.";
     setNavUser(user);
+    await loadProfile();
   } catch (err) {
     profileMessage.textContent = err.message;
   }
@@ -182,6 +294,7 @@ async function boot() {
   try {
     await loadProfile();
     await loadAnalytics();
+    await loadWatchlist();
   } catch (err) {
     setToken(null);
     window.location.href = "index.html";

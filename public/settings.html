@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixMovie Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <header class="topbar">
+      <div class="brand">PixMovie</div>
+      <nav class="nav-links">
+        <a href="index.html">Library</a>
+        <a href="index.html#seriesSection">Series</a>
+        <a href="people.html">Creators</a>
+        <a id="uploadLink" href="upload.html">Upload</a>
+        <a id="profileLink" href="profile.html">Profile</a>
+        <a href="settings.html">Settings</a>
+      </nav>
+      <div class="auth-actions">
+        <a id="loginLink" class="btn ghost" href="login.html">Log In</a>
+        <a id="signupLink" class="btn" href="signup.html">Sign Up</a>
+        <span id="navUser" class="badge" style="display: none"></span>
+        <button id="logoutBtn" class="btn ghost" style="display: none">Logout</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="page-hero">
+        <div>
+          <h1>Playback Settings</h1>
+          <p>Control data usage, playback behavior, and your viewing preferences.</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Data Usage</h2>
+        <form id="settingsForm" class="form-grid">
+          <div>
+            <label class="movie-meta" for="dataMode">Quality mode</label>
+            <select id="dataMode" class="input" name="dataMode">
+              <option value="balanced">Balanced (recommended)</option>
+              <option value="low">Low data (480p, smaller audio)</option>
+            </select>
+          </div>
+          <div>
+            <label class="movie-meta" for="preferSwarm">Use swarm mode when available</label>
+            <select id="preferSwarm" class="input" name="preferSwarm">
+              <option value="0">Off</option>
+              <option value="1">On</option>
+            </select>
+          </div>
+          <div>
+            <label class="movie-meta" for="autoResume">Auto-resume playback</label>
+            <select id="autoResume" class="input" name="autoResume">
+              <option value="1">On</option>
+              <option value="0">Off</option>
+            </select>
+          </div>
+          <div>
+            <label class="movie-meta" for="trackHistory">Save watch history</label>
+            <select id="trackHistory" class="input" name="trackHistory">
+              <option value="1">On</option>
+              <option value="0">Off</option>
+            </select>
+          </div>
+          <button class="btn sun" type="submit">Save Settings</button>
+        </form>
+        <p id="settingsMessage" class="movie-meta"></p>
+      </section>
+    </main>
+
+    <div class="footer">PixMovie keeps your viewing in your control.</div>
+
+    <script src="config.js"></script>
+    <script src="shared.js"></script>
+    <script src="settings.js"></script>
+  </body>
+</html>
