@@ -7,6 +7,12 @@ const Series = require("../models/Series");
 const Movie = require("../models/Movie");
 const User = require("../models/User");
 const { transcodeToMp4 } = require("../server/transcode");
+const {
+  isR2Enabled,
+  uploadLocalFile,
+  contentTypeFromKey,
+  deleteObject
+} = require("../server/r2");
 
 const router = express.Router();
 
@@ -99,11 +105,22 @@ router.post("/", auth, seriesHeaderUpload.single("header"), async (req, res) => 
       return res.status(400).json({ message: "title and seasonsCount are required" });
     }
 
+    let headerImage = req.file ? `/headers/series/${req.file.filename}` : null;
+    if (req.file && isR2Enabled()) {
+      const key = `headers/series/${req.file.filename}`;
+      await uploadLocalFile({
+        key,
+        filePath: req.file.path,
+        contentType: contentTypeFromKey(key)
+      });
+      safeUnlink(req.file.path);
+    }
+
     const series = await Series.create({
       title,
       seasonsCount,
       uploader: req.user.id,
-      headerImage: req.file ? `/headers/series/${req.file.filename}` : null
+      headerImage
     });
 
     return res.json(series);
@@ -156,8 +173,22 @@ router.put("/:id/header", auth, seriesHeaderUpload.single("header"), async (req,
     }
 
     if (series.headerImage) {
-      const oldPath = path.join(__dirname, "..", "public", series.headerImage.replace(/^\//, ""));
+      const normalized = series.headerImage.replace(/^\//, "");
+      const oldPath = path.join(__dirname, "..", "public", normalized);
       safeUnlink(oldPath);
+      if (isR2Enabled() && normalized.startsWith("headers/")) {
+        deleteObject({ key: normalized }).catch(() => {});
+      }
+    }
+
+    if (isR2Enabled()) {
+      const key = `headers/series/${req.file.filename}`;
+      await uploadLocalFile({
+        key,
+        filePath: req.file.path,
+        contentType: contentTypeFromKey(key)
+      });
+      safeUnlink(req.file.path);
     }
 
     const nextHeader = `/headers/series/${req.file.filename}`;
@@ -255,22 +286,41 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
     const client = req.app.locals.torrentClient;
     const trackers = req.app.locals.trackers;
 
-    const torrent = await new Promise((resolve, reject) => {
-      try {
-        client.seed(finalPath, { announce: trackers }, (t) => resolve(t));
-      } catch (err) {
-        reject(err);
-      }
-    });
+    let magnetLink = "";
+    if (client) {
+      const torrent = await new Promise((resolve, reject) => {
+        try {
+          client.seed(finalPath, { announce: trackers }, (t) => resolve(t));
+        } catch (err) {
+          reject(err);
+        }
+      });
+      magnetLink = torrent.magnetURI;
+    }
+
+    let storageProvider = "local";
+    let storageKey = null;
+    if (isR2Enabled()) {
+      storageProvider = "r2";
+      storageKey = `movies/series/${seriesId}/season-${seasonNumber}/${finalName}`;
+      await uploadLocalFile({
+        key: storageKey,
+        filePath: finalPath,
+        contentType: contentTypeFromKey(storageKey)
+      });
+      safeUnlink(finalPath);
+    }
 
     const movie = await Movie.create({
       title,
       uploader: req.user.id,
-      magnetLink: torrent.magnetURI,
+      magnetLink,
       views: 0,
       fileSize: finalSize,
       fileName: finalName,
-      filePath: relativePath,
+      filePath: storageProvider === "local" ? relativePath : null,
+      storageProvider,
+      storageKey,
       isEpisode: true,
       seriesId,
       seriesTitle: series.title,

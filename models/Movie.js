@@ -11,7 +11,7 @@ if (useFileDb) {
       title: { type: String, required: true, trim: true },
       uploader: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
       uploadDate: { type: Date, default: Date.now },
-      magnetLink: { type: String, required: true },
+      magnetLink: { type: String, default: "" },
       views: { type: Number, default: 0 },
       viewHistory: [
         {
@@ -22,6 +22,8 @@ if (useFileDb) {
       fileSize: { type: Number, required: true },
       fileName: { type: String, required: true },
       filePath: { type: String, trim: true },
+      storageProvider: { type: String, default: "local" },
+      storageKey: { type: String, trim: true },
       headerImage: { type: String, trim: true },
       isEpisode: { type: Boolean, default: false },
       seriesId: { type: mongoose.Schema.Types.ObjectId, ref: "Series" },

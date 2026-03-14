@@ -4,12 +4,28 @@ const fs = require("fs");
 const multer = require("multer");
 const auth = require("../server/middleware/auth");
 const User = require("../models/User");
+const {
+  isR2Enabled,
+  uploadLocalFile,
+  contentTypeFromKey,
+  deleteObject
+} = require("../server/r2");
 
 const router = express.Router();
 
 const avatarsDir = path.join(__dirname, "..", "public", "avatars");
 if (!fs.existsSync(avatarsDir)) {
   fs.mkdirSync(avatarsDir, { recursive: true });
+}
+
+function safeUnlink(targetPath) {
+  if (!targetPath) return;
+  if (!fs.existsSync(targetPath)) return;
+  try {
+    fs.unlinkSync(targetPath);
+  } catch (err) {
+    // Ignore cleanup errors
+  }
 }
 
 const avatarStorage = multer.diskStorage({
@@ -66,6 +82,15 @@ router.put("/me", auth, avatarUpload.single("avatar"), async (req, res) => {
     }
 
     if (req.file) {
+      if (isR2Enabled()) {
+        const key = `avatars/${req.file.filename}`;
+        await uploadLocalFile({
+          key,
+          filePath: req.file.path,
+          contentType: contentTypeFromKey(key)
+        });
+        safeUnlink(req.file.path);
+      }
       updates.avatarUrl = `/avatars/${req.file.filename}`;
     }
 
@@ -77,9 +102,23 @@ router.put("/me", auth, avatarUpload.single("avatar"), async (req, res) => {
       return res.status(400).json({ message: "No profile updates provided" });
     }
 
+    const previous = await User.findById(req.user.id);
     const user = await User.findByIdAndUpdate(req.user.id, updates, { new: true });
     if (!user) {
       return res.status(404).json({ message: "User not found" });
+    }
+
+    if (
+      isR2Enabled() &&
+      updates.avatarUrl &&
+      previous &&
+      previous.avatarUrl &&
+      previous.avatarUrl !== updates.avatarUrl
+    ) {
+      const normalized = String(previous.avatarUrl).replace(/^\//, "");
+      if (normalized.startsWith("avatars/")) {
+        deleteObject({ key: normalized }).catch(() => {});
+      }
     }
 
     return res.json({

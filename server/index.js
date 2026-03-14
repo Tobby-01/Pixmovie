@@ -15,6 +15,7 @@ const userRoutes = require("../routes/users");
 const analyticsRoutes = require("../routes/analytics");
 const seriesRoutes = require("../routes/series");
 const systemRoutes = require("../routes/system");
+const { isR2Enabled, getObjectStream, contentTypeFromKey } = require("./r2");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -44,8 +45,36 @@ if (!fs.existsSync(headersDir)) {
 }
 
 app.use(express.static(publicDir));
+
+app.get("/headers/*", async (req, res, next) => {
+  if (!isR2Enabled()) return next();
+  const key = `headers/${req.params[0]}`;
+  try {
+    const object = await getObjectStream({ key });
+    res.setHeader("Content-Type", object.ContentType || contentTypeFromKey(key));
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    object.Body.pipe(res);
+  } catch (err) {
+    return next();
+  }
+});
+
+app.get("/avatars/*", async (req, res, next) => {
+  if (!isR2Enabled()) return next();
+  const key = `avatars/${req.params[0]}`;
+  try {
+    const object = await getObjectStream({ key });
+    res.setHeader("Content-Type", object.ContentType || contentTypeFromKey(key));
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    object.Body.pipe(res);
+  } catch (err) {
+    return next();
+  }
+});
+
 app.use("/movies", express.static(moviesDir));
 app.use("/headers", express.static(headersDir));
+app.use("/avatars", express.static(path.join(publicDir, "avatars")));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/movies", movieRoutes);
@@ -61,6 +90,9 @@ app.get("/api/health", (req, res) => {
 async function seedExistingMovies(torrentClient) {
   const movies = await Movie.find({});
   for (const movie of movies) {
+    if (movie.storageProvider === "r2") {
+      continue;
+    }
     const relativePath = movie.filePath || movie.fileName;
     const fullPath = path.join(moviesDir, relativePath || "");
     if (!relativePath || !fs.existsSync(fullPath)) {
@@ -77,11 +109,15 @@ async function seedExistingMovies(torrentClient) {
 }
 
 async function startServer() {
-  const { default: WebTorrent } = await import("webtorrent");
-
-  const torrentClient = new WebTorrent();
-  app.locals.torrentClient = torrentClient;
-  app.locals.trackers = WEBRTC_TRACKERS;
+  if (!isR2Enabled()) {
+    const { default: WebTorrent } = await import("webtorrent");
+    const torrentClient = new WebTorrent();
+    app.locals.torrentClient = torrentClient;
+    app.locals.trackers = WEBRTC_TRACKERS;
+  } else {
+    app.locals.torrentClient = null;
+    app.locals.trackers = WEBRTC_TRACKERS;
+  }
 
   if (USE_FILE_DB) {
     await seedExistingMovies(torrentClient);

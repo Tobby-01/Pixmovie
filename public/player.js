@@ -341,6 +341,11 @@ async function boot() {
       playerBanner.classList.add("hidden");
     }
     const fileName = String(movie.fileName || movie.filePath || "").toLowerCase();
+    const hasSwarm = Boolean(movie.magnetLink);
+    if (!hasSwarm && swarmBtn) {
+      swarmBtn.disabled = true;
+      swarmBtn.title = "Swarm mode unavailable for this upload.";
+    }
 
     async function verifyServerStream() {
       try {
@@ -411,6 +416,10 @@ async function boot() {
     }
 
     function startSwarmStream() {
+      if (!movie.magnetLink) {
+        playerStatus.textContent = "Swarm mode unavailable for this upload.";
+        return;
+      }
       if (!window.WebTorrent) {
         playerStatus.textContent = "WebTorrent failed to load.";
         return;
@@ -570,11 +579,11 @@ async function boot() {
       await startHlsStream({ lowData: lowDataMode });
     } else {
       const canStream = await verifyServerStream();
-      if (preferSwarmSetting && window.WebTorrent) {
+      if (preferSwarmSetting && window.WebTorrent && hasSwarm) {
         startSwarmStream();
       } else if (canStream) {
         startServerStream();
-      } else if (window.WebTorrent) {
+      } else if (window.WebTorrent && hasSwarm) {
         startSwarmStream();
       } else {
         await startHlsStream({ lowData: lowDataMode });

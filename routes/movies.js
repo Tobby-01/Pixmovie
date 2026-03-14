@@ -7,6 +7,13 @@ const Movie = require("../models/Movie");
 const User = require("../models/User");
 const { transcodeToMp4 } = require("../server/transcode");
 const { transcodeToHls } = require("../server/hls");
+const {
+  isR2Enabled,
+  uploadLocalFile,
+  getObjectStream,
+  deleteObject,
+  contentTypeFromKey
+} = require("../server/r2");
 
 const router = express.Router();
 
@@ -139,6 +146,37 @@ router.get("/:id/stream", async (req, res) => {
       return res.status(404).json({ message: "Movie not found" });
     }
 
+    if (isR2Enabled() && movie.storageProvider === "r2" && movie.storageKey) {
+      try {
+        const range = req.headers.range;
+        const object = await getObjectStream({ key: movie.storageKey, range });
+        const contentType =
+          object.ContentType || contentTypeFromKey(movie.storageKey) || "video/mp4";
+
+        const headers = {
+          "Content-Type": contentType,
+          "Accept-Ranges": "bytes"
+        };
+
+        if (object.ContentRange) {
+          headers["Content-Range"] = object.ContentRange;
+        }
+        if (object.ContentLength != null) {
+          headers["Content-Length"] = object.ContentLength;
+        }
+
+        res.writeHead(object.ContentRange ? 206 : 200, headers);
+        object.Body.pipe(res);
+        return;
+      } catch (err) {
+        const code = err && (err.name || err.Code || err.code);
+        if (code === "NoSuchKey" || code === "NotFound") {
+          return res.status(404).json({ message: "File missing on storage" });
+        }
+        return res.status(500).json({ message: "Failed to stream movie" });
+      }
+    }
+
     let relativePath = movie.filePath || movie.fileName;
     const filePath = relativePath ? path.join(moviesDir, relativePath) : null;
     if (!filePath || !fs.existsSync(filePath)) {
@@ -251,6 +289,10 @@ router.get("/:id/hls", async (req, res) => {
     const movie = await Movie.findById(req.params.id);
     if (!movie) {
       return res.status(404).json({ message: "Movie not found" });
+    }
+
+    if (isR2Enabled() && movie.storageProvider === "r2") {
+      return res.status(501).json({ message: "HLS not available for R2 storage yet" });
     }
 
     const relativePath = movie.filePath || movie.fileName;
@@ -489,19 +531,37 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
       }
     }
 
+    let magnetLink = "";
     const client = req.app.locals.torrentClient;
     const trackers = req.app.locals.trackers;
+    if (client) {
+      const torrent = await seedFile(client, finalPath, trackers);
+      magnetLink = torrent.magnetURI;
+    }
 
-    const torrent = await seedFile(client, finalPath, trackers);
+    let storageProvider = "local";
+    let storageKey = null;
+    if (isR2Enabled()) {
+      storageProvider = "r2";
+      storageKey = `movies/${finalName}`;
+      await uploadLocalFile({
+        key: storageKey,
+        filePath: finalPath,
+        contentType: contentTypeFromKey(storageKey)
+      });
+      safeUnlink(finalPath);
+    }
 
     const movie = await Movie.create({
       title,
       uploader: req.user.id,
-      magnetLink: torrent.magnetURI,
+      magnetLink,
       views: 0,
       fileSize: finalSize,
       fileName: finalName,
-      filePath: path.relative(moviesDir, finalPath)
+      filePath: storageProvider === "local" ? path.relative(moviesDir, finalPath) : null,
+      storageProvider,
+      storageKey
     });
 
     await User.findByIdAndUpdate(req.user.id, { $push: { uploadedMovies: movie._id } });
@@ -526,13 +586,22 @@ router.put("/:id/header", auth, headerUpload.single("header"), async (req, res) 
     }
 
     if (movie.headerImage) {
-      const oldPath = path.join(
-        __dirname,
-        "..",
-        "public",
-        movie.headerImage.replace(/^\//, "")
-      );
+      const normalized = movie.headerImage.replace(/^\//, "");
+      const oldPath = path.join(__dirname, "..", "public", normalized);
       safeUnlink(oldPath);
+      if (isR2Enabled() && normalized.startsWith("headers/")) {
+        deleteObject({ key: normalized }).catch(() => {});
+      }
+    }
+
+    if (isR2Enabled()) {
+      const key = `headers/movies/${req.file.filename}`;
+      await uploadLocalFile({
+        key,
+        filePath: req.file.path,
+        contentType: contentTypeFromKey(key)
+      });
+      safeUnlink(req.file.path);
     }
 
     const nextHeader = `/headers/movies/${req.file.filename}`;
@@ -576,14 +645,22 @@ router.delete("/:id", auth, async (req, res) => {
       }
     }
 
-    const relativePath = movie.filePath || movie.fileName;
-    if (relativePath) {
-      const filePath = path.join(moviesDir, relativePath);
-      if (fs.existsSync(filePath)) {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (err) {
-          // Ignore file delete errors so DB cleanup still happens
+    if (movie.storageProvider === "r2" && movie.storageKey && isR2Enabled()) {
+      try {
+        await deleteObject({ key: movie.storageKey });
+      } catch (err) {
+        // Ignore R2 delete errors so DB cleanup still happens
+      }
+    } else {
+      const relativePath = movie.filePath || movie.fileName;
+      if (relativePath) {
+        const filePath = path.join(moviesDir, relativePath);
+        if (fs.existsSync(filePath)) {
+          try {
+            fs.unlinkSync(filePath);
+          } catch (err) {
+            // Ignore file delete errors so DB cleanup still happens
+          }
         }
       }
     }
