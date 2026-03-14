@@ -1,1 +1,2 @@
-window.API_BASE = "https://YOUR_TUNNEL_URL/api";
+window.API_BASE = "https://pixmovie.onrender.com/api";
+
