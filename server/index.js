@@ -111,6 +111,9 @@ async function seedExistingMovies(torrentClient) {
 
 async function startServer() {
   let torrentClient = null;
+  if (isR2Enabled()) {
+    console.log(`R2 enabled. Bucket: ${process.env.R2_BUCKET || "missing"}`);
+  }
   if (!isR2Enabled()) {
     const { default: WebTorrent } = await import("webtorrent");
     torrentClient = new WebTorrent();

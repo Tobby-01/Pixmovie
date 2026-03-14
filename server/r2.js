@@ -1,6 +1,11 @@
 const fs = require("fs");
 const path = require("path");
-const { S3Client, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const {
+  S3Client,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  HeadBucketCommand
+} = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
 
 const R2_ENABLED = process.env.R2_ENABLED === "1";
@@ -100,10 +105,18 @@ async function deleteObject({ key }) {
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: finalKey }));
 }
 
+async function checkBucket() {
+  const client = getClient();
+  const bucket = getBucket();
+  await client.send(new HeadBucketCommand({ Bucket: bucket }));
+  return true;
+}
+
 module.exports = {
   isR2Enabled,
   getObjectStream,
   uploadLocalFile,
   deleteObject,
-  contentTypeFromKey
+  contentTypeFromKey,
+  checkBucket
 };
