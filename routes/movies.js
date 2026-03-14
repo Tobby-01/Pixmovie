@@ -568,7 +568,8 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
 
     return res.json(movie);
   } catch (err) {
-    return res.status(500).json({ message: "Upload failed" });
+    console.error("Movie upload failed:", err);
+    return res.status(500).json({ message: err.message || "Upload failed" });
   }
 });
 

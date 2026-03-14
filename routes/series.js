@@ -333,7 +333,8 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
 
     return res.json(movie);
   } catch (err) {
-    return res.status(500).json({ message: "Episode upload failed" });
+    console.error("Episode upload failed:", err);
+    return res.status(500).json({ message: err.message || "Episode upload failed" });
   }
 });
 
