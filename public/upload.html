@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixMovie Uploads</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <header class="topbar">
+      <div class="brand">PixMovie</div>
+      <nav class="nav-links">
+        <a href="index.html">Library</a>
+        <a id="uploadLink" href="upload.html">Upload</a>
+        <a id="profileLink" href="profile.html">Profile</a>
+      </nav>
+      <div class="auth-actions">
+        <a id="loginLink" class="btn ghost" href="login.html">Log In</a>
+        <a id="signupLink" class="btn" href="signup.html">Sign Up</a>
+        <span id="navUser" class="badge" style="display: none"></span>
+        <button id="logoutBtn" class="btn ghost" style="display: none">Logout</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="page-hero">
+        <div>
+          <h1>Upload Center</h1>
+          <p>Create a series folder or upload a standalone movie. All uploads support progress.</p>
+        </div>
+      </section>
+      <div id="ffmpegBanner" class="series-alert hidden">
+        FFmpeg is not installed on this server. MKV and other non-browser formats will not play.
+        Install with `winget install Gyan.FFmpeg`, then restart the server.
+      </div>
+
+      <section class="panel">
+        <h2>Create Series Folder</h2>
+        <form id="seriesForm" class="form-grid">
+          <input class="input" name="title" placeholder="Series name" required />
+          <input
+            class="input"
+            type="number"
+            name="seasonsCount"
+            placeholder="Number of seasons"
+            min="1"
+            required
+          />
+          <div class="form-span banner-upload">
+            <label class="banner-label" for="headerInput">Series header image (optional)</label>
+            <input
+              id="headerInput"
+              class="input"
+              type="file"
+              name="header"
+              accept="image/*"
+            />
+            <div id="headerPreview" class="header-preview hidden"></div>
+            <div class="movie-meta">Recommended: 1280x360 JPG or PNG.</div>
+          </div>
+          <button class="btn sun" type="submit">Create Series</button>
+        </form>
+        <p id="seriesMessage" class="movie-meta"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Your Series</h2>
+        <div id="seriesGrid" class="series-grid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Upload a Standalone Movie</h2>
+        <form id="uploadForm" class="form-grid">
+          <input class="input" name="title" placeholder="Movie title" required />
+          <input
+            class="input"
+            type="file"
+            name="video"
+            accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+            required
+          />
+          <button id="uploadBtn" class="btn sun" type="submit">Upload & Seed</button>
+        </form>
+        <div class="upload-info">
+          <div id="uploadFileInfo" class="movie-meta">No file selected.</div>
+          <div id="uploadProgressWrap" class="progress hidden">
+            <div id="uploadProgressBar" class="progress-bar"></div>
+          </div>
+          <div class="upload-stats">
+            <span id="uploadPercent">0%</span>
+            <span id="uploadBytes">0 MB / 0 MB</span>
+          </div>
+        </div>
+        <p id="uploadMessage" class="movie-meta"></p>
+      </section>
+    </main>
+
+    <div class="footer">PixMovie keeps uploads organized and ready to stream.</div>
+
+    <script src="config.js"></script>
+    <script src="shared.js"></script>
+    <script src="upload.js"></script>
+  </body>
+</html>

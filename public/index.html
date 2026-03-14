@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixMovie Library</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <header class="topbar">
+      <div class="brand">PixMovie</div>
+      <nav class="nav-links">
+        <a href="index.html">Library</a>
+        <a id="uploadLink" href="upload.html">Upload</a>
+        <a id="profileLink" href="profile.html">Profile</a>
+      </nav>
+      <div class="auth-actions">
+        <a id="loginLink" class="btn ghost" href="login.html">Log In</a>
+        <a id="signupLink" class="btn" href="signup.html">Sign Up</a>
+        <span id="navUser" class="badge" style="display: none"></span>
+        <button id="logoutBtn" class="btn ghost" style="display: none">Logout</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <div>
+          <h1>Stream. Seed. Share.</h1>
+          <p>
+            PixMovie turns every upload into a community-powered stream. Watch instantly with
+            peer-to-peer delivery or just stream from the server.
+          </p>
+          <button class="btn sun" onclick="document.getElementById('library').scrollIntoView()">
+            Browse the Library
+          </button>
+        </div>
+        <div class="hero-card">
+          <h3>How it works</h3>
+          <p>
+            Upload a movie, we seed it with WebTorrent, and viewers choose server streaming or
+            swarm mode to reduce bandwidth.
+          </p>
+          <div class="badge">Powered by WebTorrent</div>
+        </div>
+      </section>
+
+      <section id="library" class="panel">
+        <h2>Public Library</h2>
+        <input id="searchInput" class="input" placeholder="Search by title..." />
+        <div id="movieGrid" class="movie-grid"></div>
+      </section>
+    </main>
+
+    <div class="footer">PixMovie is built for sharing. Seed responsibly.</div>
+
+    <script src="config.js"></script>
+    <script src="shared.js"></script>
+    <script src="library.js"></script>
+  </body>
+</html>

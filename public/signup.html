@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixMovie Sign Up</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <header class="topbar">
+      <div class="brand">PixMovie</div>
+      <nav class="nav-links">
+        <a href="index.html">Library</a>
+        <a id="uploadLink" href="upload.html">Upload</a>
+        <a id="profileLink" href="profile.html">Profile</a>
+      </nav>
+      <div class="auth-actions">
+        <a id="loginLink" class="btn ghost" href="login.html">Log In</a>
+        <a id="signupLink" class="btn" href="signup.html">Sign Up</a>
+        <span id="navUser" class="badge" style="display: none"></span>
+        <button id="logoutBtn" class="btn ghost" style="display: none">Logout</button>
+      </div>
+    </header>
+
+    <main class="container auth-page">
+      <div class="auth-card">
+        <h1>Create your account</h1>
+        <p class="movie-meta">Build a library, upload series, and stream instantly.</p>
+        <form id="signupForm" class="auth-form">
+          <input class="input" name="username" placeholder="Username" required />
+          <input class="input" type="email" name="email" placeholder="Email" required />
+          <input class="input" type="password" name="password" placeholder="Password" required />
+          <button class="btn sun" type="submit">Create Account</button>
+        </form>
+        <button id="guestStreamBtn" class="btn ghost small" type="button">
+          Stream as visitor
+        </button>
+        <p id="signupMessage" class="movie-meta"></p>
+        <p class="movie-meta">
+          Already have an account? <a class="link" href="login.html">Log in</a>
+        </p>
+      </div>
+      <div class="auth-side">
+        <h2>Launch your series</h2>
+        <p>
+          Organize seasons, upload episodes, and keep fans streaming with low data usage.
+        </p>
+        <div class="badge">Creator friendly</div>
+      </div>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="shared.js"></script>
+    <script src="signup.js"></script>
+  </body>
+</html>

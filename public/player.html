@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PixMovie Player</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-glow"></div>
+    <header class="topbar">
+      <div class="brand">PixMovie</div>
+      <nav class="nav-links">
+        <a href="index.html">Library</a>
+        <a id="uploadLink" href="upload.html">Upload</a>
+        <a id="profileLink" href="profile.html">Profile</a>
+      </nav>
+    </header>
+
+    <div class="player-shell">
+      <h2 id="playerTitle">Loading...</h2>
+      <p id="playerMeta" class="movie-meta"></p>
+      <div id="playerBanner" class="player-banner hidden">
+        <img id="playerBannerImg" alt="Movie header" />
+      </div>
+      <div class="player-actions">
+        <div class="pill-group">
+          <button id="streamBtn" class="pill active" type="button">Stream</button>
+          <button id="swarmBtn" class="pill" type="button">Swarm</button>
+        </div>
+        <button id="fullscreenBtn" class="icon-btn" type="button" title="Full screen">
+          Full
+        </button>
+      </div>
+      <video id="video" controls></video>
+      <div class="progress">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      <div class="hls-progress hidden" id="hlsProgress">
+        <div class="hls-progress-bar" id="hlsProgressBar"></div>
+      </div>
+      <div class="hls-progress-meta hidden" id="hlsProgressMeta">Preparing stream...</div>
+      <p id="playerStatus" class="movie-meta"></p>
+      <div class="stats-row">
+        <div class="stat">
+          <h3 id="statPeers">0</h3>
+          <span>Peers</span>
+        </div>
+        <div class="stat">
+          <h3 id="statSpeed">0 MB/s</h3>
+          <span>Download Speed</span>
+        </div>
+        <div class="stat">
+          <h3 id="statProgress">0%</h3>
+          <span>Progress</span>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/webtorrent@latest/webtorrent.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="config.js"></script>
+    <script src="shared.js"></script>
+    <script src="player.js"></script>
+  </body>
+</html>
