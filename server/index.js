@@ -88,6 +88,7 @@ app.get("/api/health", (req, res) => {
 });
 
 async function seedExistingMovies(torrentClient) {
+  if (!torrentClient) return;
   const movies = await Movie.find({});
   for (const movie of movies) {
     if (movie.storageProvider === "r2") {
@@ -109,9 +110,10 @@ async function seedExistingMovies(torrentClient) {
 }
 
 async function startServer() {
+  let torrentClient = null;
   if (!isR2Enabled()) {
     const { default: WebTorrent } = await import("webtorrent");
-    const torrentClient = new WebTorrent();
+    torrentClient = new WebTorrent();
     app.locals.torrentClient = torrentClient;
     app.locals.trackers = WEBRTC_TRACKERS;
   } else {
