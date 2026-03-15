@@ -86,26 +86,67 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
   const thumbnailPath = path.join(movieDir, "thumbnail.jpg");
 
   try {
+    const inputDurationSec = probeDuration(inputPath);
+    const updateProcessing = (() => {
+      let lastUpdate = 0;
+      return async (payload, force = false) => {
+        const now = Date.now();
+        if (!force && now - lastUpdate < 3000) return;
+        lastUpdate = now;
+        Object.assign(movie, payload);
+        try {
+          await movie.save();
+        } catch {
+          // ignore save errors during progress updates
+        }
+      };
+    })();
+
+    await updateProcessing({ processingStage: "encode-720", processingPercent: 0 }, true);
     await compressToH265(inputPath, compressedPath, {
       crf: "28",
       preset,
       audioBitrate: "128k",
-      scaleFilter: "scale=if(gt(ih,720),-2,iw):if(gt(ih,720),720,ih)"
+      scaleFilter: "scale=if(gt(ih,720),-2,iw):if(gt(ih,720),720,ih)",
+      durationSec: inputDurationSec,
+      onProgress: ({ percent, etaSeconds }) =>
+        updateProcessing({
+          processingStage: "encode-720",
+          processingPercent: Math.round(percent),
+          processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
+        })
     });
     if (useFullLadder) {
+      await updateProcessing({ processingStage: "encode-480", processingPercent: 0 }, true);
       await compressToH265(inputPath, midPath, {
         crf: "29",
         preset,
         audioBitrate: "96k",
-        scaleFilter: "scale=if(gt(ih,480),-2,iw):if(gt(ih,480),480,ih)"
+        scaleFilter: "scale=if(gt(ih,480),-2,iw):if(gt(ih,480),480,ih)",
+        durationSec: inputDurationSec,
+        onProgress: ({ percent, etaSeconds }) =>
+          updateProcessing({
+            processingStage: "encode-480",
+            processingPercent: Math.round(percent),
+            processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
+          })
       });
     }
+    await updateProcessing({ processingStage: "encode-240", processingPercent: 0 }, true);
     await compressToH265(inputPath, lowPath, {
       crf: "31",
       preset,
       audioBitrate: "64k",
-      scaleFilter: "scale=if(gt(ih,240),-2,iw):if(gt(ih,240),240,ih)"
+      scaleFilter: "scale=if(gt(ih,240),-2,iw):if(gt(ih,240),240,ih)",
+      durationSec: inputDurationSec,
+      onProgress: ({ percent, etaSeconds }) =>
+        updateProcessing({
+          processingStage: "encode-240",
+          processingPercent: Math.round(percent),
+          processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
+        })
     });
+    await updateProcessing({ processingStage: "packaging", processingPercent: 0 }, true);
     await generateThumbnail(compressedPath, thumbnailPath);
     const hls720Dir = path.join(movieDir, "hls", "720");
     const hls240Dir = path.join(movieDir, "hls", "240");
@@ -150,6 +191,7 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
     const masterContent = masterLines.join("\n");
     fs.writeFileSync(masterPath, masterContent);
 
+    await updateProcessing({ processingStage: "finalizing", processingPercent: 95 }, true);
     const duration = probeDuration(compressedPath);
     const compressedSize = fs.statSync(compressedPath).size;
 
@@ -194,6 +236,9 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
 
     movie.processingStatus = "ready";
     movie.processingError = "";
+    movie.processingStage = "";
+    movie.processingPercent = 100;
+    movie.processingEtaSeconds = 0;
     movie.storageProvider = storageProvider;
     movie.fileName = "compressed.mp4";
     movie.filePath = filePath;

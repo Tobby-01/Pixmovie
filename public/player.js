@@ -116,6 +116,17 @@ async function fetchMovie() {
   return res.json();
 }
 
+function formatEta(seconds) {
+  if (seconds == null || !Number.isFinite(seconds)) return "";
+  const total = Math.max(0, Math.round(seconds));
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  if (mins <= 0) {
+    return `${secs}s`;
+  }
+  return `${mins}m ${secs}s`;
+}
+
 async function recordView() {
   await fetch(`${apiBase}/movies/${movieId}/view`, { method: "POST" });
 }
@@ -352,7 +363,19 @@ async function boot() {
       try {
         const res = await fetch(url, { method: "GET" });
         if (res.status === 202) {
-          playerStatus.textContent = "Video is still processing. Try again shortly.";
+          try {
+            const updated = await fetchMovie();
+            const stage = updated.processingStage || "processing";
+            const eta = formatEta(updated.processingEtaSeconds);
+            const percent =
+              updated.processingPercent != null ? `${Math.round(updated.processingPercent)}%` : "";
+            const bits = [stage, percent, eta].filter(Boolean).join(" • ");
+            playerStatus.textContent = bits
+              ? `Processing ${bits}`
+              : "Video is still processing. Try again shortly.";
+          } catch {
+            playerStatus.textContent = "Video is still processing. Try again shortly.";
+          }
           return false;
         }
         if (!res.ok) {

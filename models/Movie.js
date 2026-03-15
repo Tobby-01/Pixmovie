@@ -13,6 +13,9 @@ if (useFileDb) {
       uploadDate: { type: Date, default: Date.now },
       processingStatus: { type: String, default: "ready" },
       processingError: { type: String, default: "" },
+      processingStage: { type: String, default: "" },
+      processingPercent: { type: Number, default: 0 },
+      processingEtaSeconds: { type: Number },
       magnetLink: { type: String, default: "" },
       views: { type: Number, default: 0 },
       viewHistory: [

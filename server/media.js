@@ -9,14 +9,82 @@ function ensureDir(dir) {
   }
 }
 
-function runFfmpeg(args, errorMessage) {
+function parseTimeToSeconds(value) {
+  const parts = String(value || "").trim().split(":");
+  if (parts.length !== 3) return null;
+  const [h, m, s] = parts;
+  const seconds = Number(h) * 3600 + Number(m) * 60 + Number(s);
+  return Number.isFinite(seconds) ? seconds : null;
+}
+
+function runFfmpeg(args, errorMessage, options = {}) {
+  const onProgress = options.onProgress;
+  const durationSec = Number.isFinite(options.durationSec) ? options.durationSec : null;
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", args, { windowsHide: true });
     let errorText = "";
+    let buffer = "";
+    let lastReported = 0;
+    let lastSpeed = null;
+
+    function maybeReport(progressTime) {
+      if (!onProgress || !durationSec || !Number.isFinite(progressTime)) return;
+      const percent = Math.min(99, Math.max(0, (progressTime / durationSec) * 100));
+      let etaSeconds = null;
+      if (lastSpeed && lastSpeed > 0) {
+        etaSeconds = Math.max(0, (durationSec - progressTime) / lastSpeed);
+      }
+      const now = Date.now();
+      if (now - lastReported < 1500 && percent < 99) return;
+      lastReported = now;
+      onProgress({
+        percent,
+        etaSeconds,
+        timeSeconds: progressTime,
+        durationSeconds: durationSec
+      });
+    }
 
     ffmpeg.stderr.on("data", (data) => {
       errorText += data.toString();
     });
+
+    if (onProgress) {
+      ffmpeg.stdout.on("data", (data) => {
+        buffer += data.toString();
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+        lines.forEach((line) => {
+          const [key, rawValue] = line.split("=");
+          const value = rawValue ? rawValue.trim() : "";
+          if (key === "out_time_ms") {
+            const ms = Number(value);
+            if (Number.isFinite(ms)) {
+              maybeReport(ms / 1000000);
+            }
+          } else if (key === "out_time") {
+            const seconds = parseTimeToSeconds(value);
+            if (seconds != null) {
+              maybeReport(seconds);
+            }
+          } else if (key === "speed") {
+            const speed = parseFloat(value.replace("x", ""));
+            if (Number.isFinite(speed)) {
+              lastSpeed = speed;
+            }
+          } else if (key === "progress" && value === "end") {
+            if (durationSec) {
+              onProgress({
+                percent: 100,
+                etaSeconds: 0,
+                timeSeconds: durationSec,
+                durationSeconds: durationSec
+              });
+            }
+          }
+        });
+      });
+    }
 
     ffmpeg.on("error", () => {
       reject(new Error("FFmpeg is not installed or not on PATH."));
@@ -67,11 +135,19 @@ function compressToH265(inputPath, outputPath, options = {}) {
         "-b:a",
         String(audioBitrate),
         "-movflags",
-        "+faststart",
-        outputPath
+        "+faststart"
       ];
 
-      await runFfmpeg(args, "Video compression failed.");
+      if (options.onProgress) {
+        args.push("-progress", "pipe:1", "-nostats");
+      }
+
+      args.push(outputPath);
+
+      await runFfmpeg(args, "Video compression failed.", {
+        onProgress: options.onProgress,
+        durationSec: options.durationSec
+      });
       resolve(path.normalize(outputPath));
     } catch (err) {
       reject(err);
