@@ -314,7 +314,7 @@ router.get("/:id/download", async (req, res) => {
     }
 
     const downloadName = `${movie.title || "movie"}.mp4`;
-    const disposition = `attachment; filename=\"${downloadName.replace(/\"/g, \"\")}\"`;
+    const disposition = `attachment; filename="${downloadName.replace(/"/g, "")}"`;
 
     if (isR2Enabled() && movie.storageProvider === "r2") {
       const key = getCompressedKey(movie);
