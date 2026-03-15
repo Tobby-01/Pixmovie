@@ -5,13 +5,14 @@ const multer = require("multer");
 const auth = require("../server/middleware/auth");
 const Movie = require("../models/Movie");
 const User = require("../models/User");
-const { transcodeToMp4 } = require("../server/transcode");
-const { transcodeToHls } = require("../server/hls");
+const { enqueue } = require("../server/queue");
+const { processMovieUpload } = require("../server/videoPipeline");
 const {
   isR2Enabled,
   uploadLocalFile,
   getObjectStream,
   deleteObject,
+  deletePrefix,
   contentTypeFromKey
 } = require("../server/r2");
 
@@ -19,15 +20,19 @@ const router = express.Router();
 
 const moviesDir = path.join(__dirname, "..", "movies");
 const headersDir = path.join(__dirname, "..", "public", "headers", "movies");
+const uploadsDir = path.join(moviesDir, "_uploads");
 if (!fs.existsSync(moviesDir)) {
   fs.mkdirSync(moviesDir, { recursive: true });
 }
 if (!fs.existsSync(headersDir)) {
   fs.mkdirSync(headersDir, { recursive: true });
 }
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, moviesDir),
+  destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
     const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
     cb(null, `${Date.now()}_${safeName}`);
@@ -71,9 +76,6 @@ const allowedExtensions = new Set([
   ".wmv",
   ".ts"
 ]);
-const playableExtensions = new Set([".mp4", ".webm", ".mov"]);
-const transcodeLocks = new Map();
-const hlsLocks = new Map();
 
 function getLiveMap(req) {
   if (!req.app.locals.liveViews) {
@@ -106,22 +108,91 @@ function safeUnlink(targetPath) {
   }
 }
 
-function isPlayableFile(fileName) {
-  return playableExtensions.has(path.extname(fileName).toLowerCase());
-}
-
 function isAllowedFile(fileName) {
   return allowedExtensions.has(path.extname(fileName).toLowerCase());
 }
 
-function seedFile(client, filePath, trackers) {
-  return new Promise((resolve, reject) => {
-    try {
-      client.seed(filePath, { announce: trackers }, (torrent) => resolve(torrent));
-    } catch (err) {
-      reject(err);
-    }
+function getMovieFolder(movieId) {
+  return path.join(moviesDir, String(movieId));
+}
+
+function getCompressedLocalPath(movie) {
+  if (movie.filePath) {
+    return path.join(moviesDir, movie.filePath);
+  }
+  return path.join(getMovieFolder(movie._id), "compressed.mp4");
+}
+
+function getCompressedKey(movie) {
+  return movie.compressedKey || movie.storageKey || `movies/${movie._id}/compressed.mp4`;
+}
+
+function getHlsKey(movie, fileName) {
+  if (fileName === "master.m3u8" && movie.hlsKey) {
+    return movie.hlsKey;
+  }
+  return `movies/${movie._id}/${fileName}`;
+}
+
+async function streamR2Key({ key, req, res, contentDisposition }) {
+  const range = req.headers.range;
+  const object = await getObjectStream({ key, range });
+  const contentType = object.ContentType || contentTypeFromKey(key) || "application/octet-stream";
+
+  const headers = {
+    "Content-Type": contentType,
+    "Accept-Ranges": "bytes"
+  };
+
+  if (object.ContentRange) {
+    headers["Content-Range"] = object.ContentRange;
+  }
+  if (object.ContentLength != null) {
+    headers["Content-Length"] = object.ContentLength;
+  }
+  if (contentDisposition) {
+    headers["Content-Disposition"] = contentDisposition;
+  }
+
+  res.writeHead(object.ContentRange ? 206 : 200, headers);
+  object.Body.pipe(res);
+}
+
+function streamLocalFile({ filePath, req, res, contentType, contentDisposition }) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return res.status(404).json({ message: "File missing on server" });
+  }
+
+  const stat = fs.statSync(filePath);
+  const fileSize = stat.size;
+  const range = req.headers.range;
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunkSize = end - start + 1;
+
+    res.writeHead(206, {
+      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges": "bytes",
+      "Content-Length": chunkSize,
+      "Content-Type": contentType || "application/octet-stream",
+      ...(contentDisposition ? { "Content-Disposition": contentDisposition } : {})
+    });
+
+    const stream = fs.createReadStream(filePath, { start, end });
+    stream.pipe(res);
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Length": fileSize,
+    "Content-Type": contentType || "application/octet-stream",
+    "Accept-Ranges": "bytes",
+    ...(contentDisposition ? { "Content-Disposition": contentDisposition } : {})
   });
+  fs.createReadStream(filePath).pipe(res);
 }
 
 router.get("/", async (req, res) => {
@@ -145,190 +216,121 @@ router.get("/:id/stream", async (req, res) => {
     if (!movie) {
       return res.status(404).json({ message: "Movie not found" });
     }
-
-    if (isR2Enabled() && movie.storageProvider === "r2" && movie.storageKey) {
-      try {
-        const range = req.headers.range;
-        const object = await getObjectStream({ key: movie.storageKey, range });
-        const contentType =
-          object.ContentType || contentTypeFromKey(movie.storageKey) || "video/mp4";
-
-        const headers = {
-          "Content-Type": contentType,
-          "Accept-Ranges": "bytes"
-        };
-
-        if (object.ContentRange) {
-          headers["Content-Range"] = object.ContentRange;
-        }
-        if (object.ContentLength != null) {
-          headers["Content-Length"] = object.ContentLength;
-        }
-
-        res.writeHead(object.ContentRange ? 206 : 200, headers);
-        object.Body.pipe(res);
-        return;
-      } catch (err) {
-        const code = err && (err.name || err.Code || err.code);
-        if (code === "NoSuchKey" || code === "NotFound") {
-          return res.status(404).json({ message: "File missing on storage" });
-        }
-        return res.status(500).json({ message: "Failed to stream movie" });
-      }
+    if (movie.processingStatus && movie.processingStatus !== "ready") {
+      return res.status(202).json({ status: movie.processingStatus });
     }
 
-    let relativePath = movie.filePath || movie.fileName;
-    const filePath = relativePath ? path.join(moviesDir, relativePath) : null;
-    if (!filePath || !fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "File missing on server" });
+    const manifest = "master.m3u8";
+    if (isR2Enabled() && movie.storageProvider === "r2") {
+      const key = getHlsKey(movie, manifest);
+      return await streamR2Key({ key, req, res });
     }
 
-    const ext = path.extname(filePath).toLowerCase();
-    if (ext === ".mkv") {
-      let lock = transcodeLocks.get(filePath);
-      if (!lock) {
-        lock = (async () => {
-          const outputPath = await transcodeToMp4(filePath);
-          try {
-            fs.unlinkSync(filePath);
-          } catch (err) {
-            // ignore cleanup errors
-          }
-          return outputPath;
-        })();
-        transcodeLocks.set(filePath, lock);
-        lock.finally(() => transcodeLocks.delete(filePath));
-      }
-
-      try {
-        const outputPath = await lock;
-        relativePath = path.relative(moviesDir, outputPath);
-        const newFileName = path.basename(outputPath);
-        const newSize = fs.statSync(outputPath).size;
-
-        const client = req.app.locals.torrentClient;
-        const trackers = req.app.locals.trackers;
-        let magnetLink = movie.magnetLink;
-        if (client) {
-          const torrent = await new Promise((resolve, reject) => {
-            try {
-              client.seed(outputPath, { announce: trackers }, (t) => resolve(t));
-            } catch (err) {
-              reject(err);
-            }
-          });
-          magnetLink = torrent.magnetURI;
-        }
-
-        if (typeof movie.save === "function") {
-          movie.filePath = relativePath;
-          movie.fileName = newFileName;
-          movie.fileSize = newSize;
-          movie.magnetLink = magnetLink;
-          await movie.save();
-        } else {
-          await Movie.findByIdAndUpdate(
-            req.params.id,
-            {
-              filePath: relativePath,
-              fileName: newFileName,
-              fileSize: newSize,
-              magnetLink
-            },
-            { new: true }
-          );
-        }
-      } catch (err) {
-        return res.status(500).json({ message: err.message || "Transcoding failed" });
-      }
-    }
-
-    const resolvedPath = path.join(moviesDir, relativePath);
-    const stat = fs.statSync(resolvedPath);
-    const fileSize = stat.size;
-    const range = req.headers.range;
-    const contentTypes = {
-      ".mp4": "video/mp4",
-      ".webm": "video/webm",
-      ".mkv": "video/x-matroska",
-      ".mov": "video/quicktime"
-    };
-    const contentType = contentTypes[path.extname(resolvedPath).toLowerCase()] || "video/mp4";
-
-    if (range) {
-      const parts = range.replace(/bytes=/, "").split("-");
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-      const chunkSize = end - start + 1;
-
-      res.writeHead(206, {
-        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-        "Accept-Ranges": "bytes",
-        "Content-Length": chunkSize,
-        "Content-Type": contentType
-      });
-
-      const stream = fs.createReadStream(resolvedPath, { start, end });
-      stream.pipe(res);
-      return;
-    }
-
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": contentType,
-      "Accept-Ranges": "bytes"
+    const localPath = path.join(getMovieFolder(movie._id), manifest);
+    return streamLocalFile({
+      filePath: localPath,
+      req,
+      res,
+      contentType: contentTypeFromKey(manifest)
     });
-    fs.createReadStream(resolvedPath).pipe(res);
   } catch (err) {
     return res.status(500).json({ message: "Failed to stream movie" });
   }
 });
 
 router.get("/:id/hls", async (req, res) => {
+  return res.redirect(`/api/movies/${req.params.id}/hls/master.m3u8`);
+});
+
+router.get("/:id/hls/*", async (req, res) => {
   try {
     const movie = await Movie.findById(req.params.id);
     if (!movie) {
       return res.status(404).json({ message: "Movie not found" });
     }
 
+    if (movie.processingStatus && movie.processingStatus !== "ready") {
+      return res.status(202).json({ status: movie.processingStatus });
+    }
+
+    const fileName = req.params[0];
+    if (!fileName) {
+      return res.status(400).json({ message: "file is required" });
+    }
+
     if (isR2Enabled() && movie.storageProvider === "r2") {
-      return res.status(501).json({ message: "HLS not available for R2 storage yet" });
+      const key = getHlsKey(movie, fileName);
+      return await streamR2Key({ key, req, res });
     }
 
-    const relativePath = movie.filePath || movie.fileName;
-    const filePath = relativePath ? path.join(moviesDir, relativePath) : null;
-    if (!filePath || !fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "File missing on server" });
-    }
-
-    const lowData = req.query.low === "1";
-    const variant = lowData ? "low" : "standard";
-    const hlsDir = path.join(moviesDir, "_hls", movie._id, variant);
-    const hlsIndex = path.join(hlsDir, "index.m3u8");
-
-    if (fs.existsSync(hlsIndex)) {
-      return res.sendFile(hlsIndex);
-    }
-
-    let lock = hlsLocks.get(hlsDir);
-    if (!lock) {
-      lock = (async () => {
-        await transcodeToHls(filePath, hlsDir, { lowData });
-        return hlsIndex;
-      })();
-      hlsLocks.set(hlsDir, lock);
-      lock.finally(() => hlsLocks.delete(hlsDir));
-    }
-
-    const wait = req.query.wait === "1";
-    if (!wait) {
-      return res.status(202).json({ message: "Transcoding to HLS" });
-    }
-
-    const indexPath = await lock;
-    return res.sendFile(indexPath);
+    const localPath = path.join(getMovieFolder(movie._id), fileName);
+    return streamLocalFile({
+      filePath: localPath,
+      req,
+      res,
+      contentType: contentTypeFromKey(fileName)
+    });
   } catch (err) {
     return res.status(500).json({ message: err.message || "HLS failed" });
+  }
+});
+
+router.get("/:id/thumbnail", async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+    if (movie.processingStatus && movie.processingStatus !== "ready") {
+      return res.status(202).json({ status: movie.processingStatus });
+    }
+
+    const fileName = "thumbnail.jpg";
+    if (isR2Enabled() && movie.storageProvider === "r2") {
+      const key = `movies/${movie._id}/${fileName}`;
+      return await streamR2Key({ key, req, res });
+    }
+
+    const localPath = path.join(getMovieFolder(movie._id), fileName);
+    return streamLocalFile({
+      filePath: localPath,
+      req,
+      res,
+      contentType: contentTypeFromKey(fileName)
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to load thumbnail" });
+  }
+});
+
+router.get("/:id/download", async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+    if (movie.processingStatus && movie.processingStatus !== "ready") {
+      return res.status(202).json({ status: movie.processingStatus });
+    }
+
+    const downloadName = `${movie.title || "movie"}.mp4`;
+    const disposition = `attachment; filename=\"${downloadName.replace(/\"/g, \"\")}\"`;
+
+    if (isR2Enabled() && movie.storageProvider === "r2") {
+      const key = getCompressedKey(movie);
+      return await streamR2Key({ key, req, res, contentDisposition: disposition });
+    }
+
+    const localPath = getCompressedLocalPath(movie);
+    return streamLocalFile({
+      filePath: localPath,
+      req,
+      res,
+      contentType: contentTypeFromKey("compressed.mp4"),
+      contentDisposition: disposition
+    });
+  } catch (err) {
+    return res.status(500).json({ message: "Failed to download movie" });
   }
 });
 
@@ -516,55 +518,24 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
         });
     }
 
-    let finalPath = req.file.path;
-    let finalName = req.file.filename;
-    let finalSize = req.file.size;
-
-    if (!isPlayableFile(req.file.originalname)) {
-      try {
-        finalPath = await transcodeToMp4(req.file.path);
-        finalName = path.basename(finalPath);
-        finalSize = fs.statSync(finalPath).size;
-        safeUnlink(req.file.path);
-      } catch (err) {
-        return res.status(500).json({ message: err.message || "Transcoding failed" });
-      }
-    }
-
-    let magnetLink = "";
-    const client = req.app.locals.torrentClient;
-    const trackers = req.app.locals.trackers;
-    if (client) {
-      const torrent = await seedFile(client, finalPath, trackers);
-      magnetLink = torrent.magnetURI;
-    }
-
-    let storageProvider = "local";
-    let storageKey = null;
-    if (isR2Enabled()) {
-      storageProvider = "r2";
-      storageKey = `movies/${finalName}`;
-      await uploadLocalFile({
-        key: storageKey,
-        filePath: finalPath,
-        contentType: contentTypeFromKey(storageKey)
-      });
-      safeUnlink(finalPath);
-    }
-
     const movie = await Movie.create({
       title,
       uploader: req.user.id,
-      magnetLink,
       views: 0,
-      fileSize: finalSize,
-      fileName: finalName,
-      filePath: storageProvider === "local" ? path.relative(moviesDir, finalPath) : null,
-      storageProvider,
-      storageKey
+      fileSize: req.file.size,
+      fileName: req.file.originalname,
+      filePath: null,
+      storageProvider: isR2Enabled() ? "r2" : "local",
+      processingStatus: "processing",
+      processingError: ""
     });
 
     await User.findByIdAndUpdate(req.user.id, { $push: { uploadedMovies: movie._id } });
+
+    enqueue(() => processMovieUpload({ movieId: movie._id, inputPath: req.file.path }))
+      .catch((err) => {
+        console.error("Movie processing failed:", err);
+      });
 
     return res.json(movie);
   } catch (err) {
@@ -646,13 +617,21 @@ router.delete("/:id", auth, async (req, res) => {
       }
     }
 
-    if (movie.storageProvider === "r2" && movie.storageKey && isR2Enabled()) {
+    if (movie.storageProvider === "r2" && isR2Enabled()) {
       try {
-        await deleteObject({ key: movie.storageKey });
+        await deletePrefix({ prefix: `movies/${movie._id}/` });
       } catch (err) {
         // Ignore R2 delete errors so DB cleanup still happens
       }
     } else {
+      const movieFolder = getMovieFolder(movie._id);
+      if (fs.existsSync(movieFolder)) {
+        try {
+          fs.rmSync(movieFolder, { recursive: true, force: true });
+        } catch (err) {
+          // Ignore file delete errors so DB cleanup still happens
+        }
+      }
       const relativePath = movie.filePath || movie.fileName;
       if (relativePath) {
         const filePath = path.join(moviesDir, relativePath);

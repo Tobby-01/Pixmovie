@@ -4,7 +4,9 @@ const {
   S3Client,
   GetObjectCommand,
   DeleteObjectCommand,
-  HeadBucketCommand
+  HeadBucketCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand
 } = require("@aws-sdk/client-s3");
 const { Upload } = require("@aws-sdk/lib-storage");
 
@@ -105,6 +107,38 @@ async function deleteObject({ key }) {
   await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: finalKey }));
 }
 
+async function deleteObjects({ keys }) {
+  const client = getClient();
+  const bucket = getBucket();
+  if (!Array.isArray(keys) || keys.length === 0) return;
+  const Objects = keys.map((key) => ({ Key: normalizeKey(key) }));
+  await client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects } }));
+}
+
+async function deletePrefix({ prefix }) {
+  const client = getClient();
+  const bucket = getBucket();
+  const finalPrefix = normalizeKey(prefix);
+  let continuationToken = undefined;
+
+  do {
+    const result = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: finalPrefix,
+        ContinuationToken: continuationToken
+      })
+    );
+
+    const keys = (result.Contents || []).map((item) => item.Key).filter(Boolean);
+    if (keys.length) {
+      await deleteObjects({ keys });
+    }
+
+    continuationToken = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuationToken);
+}
+
 async function checkBucket() {
   const client = getClient();
   const bucket = getBucket();
@@ -117,6 +151,7 @@ module.exports = {
   getObjectStream,
   uploadLocalFile,
   deleteObject,
+  deletePrefix,
   contentTypeFromKey,
   checkBucket
 };
