@@ -32,6 +32,10 @@ function runFfmpeg(args, errorMessage) {
   });
 }
 
+function escapeFilter(value) {
+  return String(value || "").replace(/,/g, "\\,");
+}
+
 function compressToH265(inputPath, outputPath, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
@@ -39,9 +43,10 @@ function compressToH265(inputPath, outputPath, options = {}) {
       const crf = options.crf || "28";
       const preset = options.preset || "fast";
       const audioBitrate = options.audioBitrate || "128k";
-      const scaleFilter =
+      const rawScaleFilter =
         options.scaleFilter ||
         "scale=if(gt(ih,720),-2,iw):if(gt(ih,720),720,ih)";
+      const scaleFilter = escapeFilter(rawScaleFilter);
 
       const args = [
         "-y",
