@@ -40,8 +40,8 @@
         </div>
       </section>
       <div id="ffmpegBanner" class="series-alert hidden">
-        FFmpeg is not installed on this server. MKV and other non-browser formats will not play.
-        Install with `winget install Gyan.FFmpeg`, then restart the server.
+        FFmpeg is not installed on this server. Upload processing will fail until FFmpeg is
+        installed. Install with `winget install Gyan.FFmpeg`, then restart the server.
       </div>
 
       <section class="panel">
@@ -86,7 +86,7 @@
             class="input"
             type="file"
             name="video"
-            accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+            accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/mpeg,video/mp2t"
             required
           />
           <button id="uploadBtn" class="btn sun" type="submit">Upload & Seed</button>
@@ -102,6 +102,9 @@
           </div>
         </div>
         <p id="uploadMessage" class="movie-meta"></p>
+        <p class="movie-meta">
+          Uploads auto-resume if your connection drops or you leave the app.
+        </p>
       </section>
     </main>
 

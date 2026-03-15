@@ -15,6 +15,7 @@ const userRoutes = require("../routes/users");
 const analyticsRoutes = require("../routes/analytics");
 const seriesRoutes = require("../routes/series");
 const systemRoutes = require("../routes/system");
+const uploadRoutes = require("../routes/uploads");
 const { isR2Enabled, getObjectStream, contentTypeFromKey } = require("./r2");
 
 const app = express();
@@ -82,6 +83,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/analytics", analyticsRoutes);
 app.use("/api/series", seriesRoutes);
 app.use("/api/system", systemRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });

@@ -138,6 +138,7 @@ function setLowDataMode(enabled) {
   if (lowDataBtn) {
     lowDataBtn.classList.toggle("active", enabled);
   }
+  localStorage.setItem("pixmovie_data_mode", enabled ? "low" : "balanced");
 }
 
 function setWatchlistState(inList) {
@@ -152,7 +153,7 @@ function renderStars(activeScore) {
     const star = document.createElement("button");
     star.type = "button";
     star.className = `star ${i <= activeScore ? "active" : ""}`;
-    star.textContent = "★";
+    star.textContent = "*";
     star.addEventListener("click", () => {
       selectedScore = i;
       renderStars(selectedScore);
@@ -347,17 +348,19 @@ async function boot() {
       swarmBtn.title = "Swarm mode unavailable for this upload.";
     }
 
-    async function verifyServerStream() {
+    async function checkHlsReady(url) {
       try {
-        const res = await fetch(`${apiBase}/movies/${movie._id}/stream`, {
-          headers: { Range: "bytes=0-1" }
-        });
-        if (res.ok || res.status === 206) {
-          return true;
+        const res = await fetch(url, { method: "GET" });
+        if (res.status === 202) {
+          playerStatus.textContent = "Video is still processing. Try again shortly.";
+          return false;
         }
-        const message = await res.text();
-        playerStatus.textContent = message || "Server stream not available.";
-        return false;
+        if (!res.ok) {
+          const message = await res.text();
+          playerStatus.textContent = message || "Server stream not available.";
+          return false;
+        }
+        return true;
       } catch {
         playerStatus.textContent = "Server stream not available.";
         return false;
@@ -400,19 +403,44 @@ async function boot() {
       }
     }
 
-    function startServerStream() {
+    async function startHlsStream(options = {}) {
       stopTorrent();
       stopHls();
       setActiveMode("stream");
-      playerStatus.textContent = "Streaming from the server with no local download.";
-      video.src = `${apiBase}/movies/${movie._id}/stream`;
-      video.load();
-      recordOnce();
-      statPeers.textContent = "0";
-      if (statLive) statLive.textContent = "0";
-      statSpeed.textContent = "0 MB/s";
-      statProgress.textContent = "0%";
-      progressBar.style.width = "0%";
+      setLowDataMode(Boolean(options.lowData));
+      playerStatus.textContent = options.lowData
+        ? "Starting low-data stream..."
+        : "Starting stream...";
+
+      const hlsUrl = options.lowData
+        ? `${apiBase}/movies/${movie._id}/hls/low/index.m3u8`
+        : `${apiBase}/movies/${movie._id}/hls/master.m3u8`;
+
+      const ready = await checkHlsReady(hlsUrl);
+      if (!ready) return false;
+
+      if (hlsProgress) hlsProgress.classList.add("hidden");
+      if (hlsProgressMeta) hlsProgressMeta.classList.add("hidden");
+
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = hlsUrl;
+        video.load();
+        recordOnce();
+        playerStatus.textContent = "Streaming via HLS.";
+        return true;
+      }
+
+      if (window.Hls) {
+        hls = new Hls();
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+        recordOnce();
+        playerStatus.textContent = "Streaming via HLS.";
+        return true;
+      }
+
+      playerStatus.textContent = "HLS playback not supported in this browser.";
+      return false;
     }
 
     function startSwarmStream() {
@@ -451,87 +479,12 @@ async function boot() {
       torrentInstance.on("wire", () => updateStats(torrentInstance));
     }
 
-    async function startHlsStream(options = {}) {
-      stopTorrent();
-      stopHls();
-      setActiveMode("stream");
-      playerStatus.textContent = options.lowData ? "Preparing low data stream..." : "Preparing stream...";
-      if (hlsProgress) hlsProgress.classList.remove("hidden");
-      if (hlsProgressMeta) {
-        hlsProgressMeta.textContent = "Preparing stream...";
-        hlsProgressMeta.classList.remove("hidden");
-      }
-
-      const params = new URLSearchParams();
-      if (options.lowData) params.set("low", "1");
-      const baseUrl = `${apiBase}/movies/${movie._id}/hls`;
-      const hlsUrl = params.toString() ? `${baseUrl}?${params.toString()}` : baseUrl;
-      const pollUrl = `${hlsUrl}${hlsUrl.includes("?") ? "&" : "?"}wait=0`;
-      let ready = false;
-      for (let i = 0; i < 30; i += 1) {
-        const res = await fetch(pollUrl);
-        if (res.status === 200) {
-          ready = true;
-          break;
-        }
-        if (res.status !== 202) {
-          const text = await res.text();
-          playerStatus.textContent = text || "HLS stream unavailable.";
-          return;
-        }
-        playerStatus.textContent = "Transcoding for playback...";
-        if (hlsProgressBar) {
-          const percent = Math.min(95, Math.floor(((i + 1) / 30) * 100));
-          hlsProgressBar.style.width = `${percent}%`;
-        }
-        if (hlsProgressMeta) {
-          hlsProgressMeta.textContent = `Transcoding... ${Math.min(
-            95,
-            Math.floor(((i + 1) / 30) * 100)
-          )}%`;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-
-      if (!ready) {
-        playerStatus.textContent = "Transcoding is taking too long.";
-        if (hlsProgressBar) hlsProgressBar.style.width = "100%";
-        if (hlsProgressMeta) hlsProgressMeta.textContent = "Still processing...";
-        return;
-      }
-
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = hlsUrl;
-        video.load();
-        recordOnce();
-        playerStatus.textContent = "Streaming via HLS.";
-        if (hlsProgressBar) hlsProgressBar.style.width = "100%";
-        if (hlsProgressMeta) hlsProgressMeta.textContent = "Stream ready.";
-        return;
-      }
-
-      if (window.Hls) {
-        hls = new Hls();
-        hls.loadSource(hlsUrl);
-        hls.attachMedia(video);
-        recordOnce();
-        playerStatus.textContent = "Streaming via HLS.";
-        if (hlsProgressBar) hlsProgressBar.style.width = "100%";
-        if (hlsProgressMeta) hlsProgressMeta.textContent = "Stream ready.";
-        return;
-      }
-
-      playerStatus.textContent = "HLS playback not supported in this browser.";
-    }
-
     streamBtn.addEventListener("click", () => {
-      setLowDataMode(false);
-      startServerStream();
+      startHlsStream({ lowData: false }).catch(() => {});
     });
     swarmBtn.addEventListener("click", startSwarmStream);
     if (lowDataBtn) {
       lowDataBtn.addEventListener("click", () => {
-        setLowDataMode(true);
         startHlsStream({ lowData: true }).catch(() => {});
       });
     }
@@ -555,15 +508,23 @@ async function boot() {
     video.addEventListener("error", () => {
       if (triedSwarmFallback) return;
       triedSwarmFallback = true;
-      startHlsStream().catch(() => {
-        if (window.WebTorrent) {
-          playerStatus.textContent = "Server stream failed. Switching to swarm mode.";
-          startSwarmStream();
-        } else {
-          playerStatus.textContent =
-            "This format may not be supported in your browser. Try MP4 or enable swarm mode.";
-        }
-      });
+      startHlsStream({ lowData: lowDataMode })
+        .then((started) => {
+          if (started) return;
+          if (window.WebTorrent && hasSwarm) {
+            playerStatus.textContent = "Stream failed. Switching to swarm mode.";
+            startSwarmStream();
+          }
+        })
+        .catch(() => {
+          if (window.WebTorrent && hasSwarm) {
+            playerStatus.textContent = "Stream failed. Switching to swarm mode.";
+            startSwarmStream();
+          } else {
+            playerStatus.textContent =
+              "This format may not be supported in your browser. Try MP4 or enable swarm mode.";
+          }
+        });
     });
 
     video.addEventListener("timeupdate", () => sendProgress(false));
@@ -573,20 +534,13 @@ async function boot() {
     video.addEventListener("pause", stopLivePing);
     video.addEventListener("ended", stopLivePing);
 
-    const ext = fileName.split(".").pop();
-    const prefersHls = ["mkv", "avi", "wmv", "mpeg", "mpg", "ts", "m4v"].includes(ext);
-    if (prefersHls) {
-      await startHlsStream({ lowData: lowDataMode });
+    if (preferSwarmSetting && window.WebTorrent && hasSwarm) {
+      startSwarmStream();
     } else {
-      const canStream = await verifyServerStream();
-      if (preferSwarmSetting && window.WebTorrent && hasSwarm) {
+      const started = await startHlsStream({ lowData: lowDataMode });
+      if (!started && window.WebTorrent && hasSwarm) {
+        playerStatus.textContent = "Switching to swarm mode.";
         startSwarmStream();
-      } else if (canStream) {
-        startServerStream();
-      } else if (window.WebTorrent && hasSwarm) {
-        startSwarmStream();
-      } else {
-        await startHlsStream({ lowData: lowDataMode });
       }
     }
 

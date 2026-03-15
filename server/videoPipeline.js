@@ -5,6 +5,7 @@ const { compressToH265, packageToHls, generateThumbnail, probeDuration } = requi
 const { isR2Enabled, uploadLocalFile, contentTypeFromKey } = require("./r2");
 
 const moviesDir = path.join(__dirname, "..", "movies");
+const resumableRoot = path.join(moviesDir, "_uploads", "resumable");
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
@@ -65,7 +66,7 @@ async function uploadHlsFolder(movieId, movieDir) {
   }
 }
 
-async function processMovieUpload({ movieId, inputPath }) {
+async function processMovieUpload({ movieId, inputPath, torrentClient, trackers }) {
   const movie = await Movie.findById(movieId);
   if (!movie) {
     safeUnlink(inputPath);
@@ -121,6 +122,7 @@ async function processMovieUpload({ movieId, inputPath }) {
     let hlsKey = null;
     let thumbnailKey = null;
     let filePath = path.relative(moviesDir, compressedPath);
+    let magnetLink = movie.magnetLink || "";
 
     if (isR2Enabled()) {
       storageProvider = "r2";
@@ -143,6 +145,17 @@ async function processMovieUpload({ movieId, inputPath }) {
       filePath = null;
     }
 
+    if (storageProvider === "local" && torrentClient) {
+      try {
+        const torrent = await new Promise((resolve, reject) => {
+          torrentClient.seed(compressedPath, { announce: trackers || [] }, (t) => resolve(t));
+        });
+        magnetLink = torrent.magnetURI;
+      } catch (err) {
+        // Ignore seeding errors
+      }
+    }
+
     movie.processingStatus = "ready";
     movie.processingError = "";
     movie.storageProvider = storageProvider;
@@ -155,6 +168,7 @@ async function processMovieUpload({ movieId, inputPath }) {
     movie.thumbnailUrl = `/api/movies/${movieId}/thumbnail`;
     movie.streamingUrl = `/api/movies/${movieId}/hls/master.m3u8`;
     movie.duration = duration;
+    movie.magnetLink = magnetLink || "";
 
     await movie.save();
   } catch (err) {
@@ -164,6 +178,10 @@ async function processMovieUpload({ movieId, inputPath }) {
     throw err;
   } finally {
     safeUnlink(inputPath);
+    const normalizedInput = path.normalize(inputPath);
+    if (normalizedInput.startsWith(path.normalize(resumableRoot))) {
+      safeRemoveDir(path.dirname(normalizedInput));
+    }
     safeUnlink(lowPath);
     if (isR2Enabled()) {
       safeRemoveDir(movieDir);

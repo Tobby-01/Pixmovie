@@ -28,11 +28,208 @@ function formatBytesCompact(bytes) {
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-const allowedExtensions = [".mp4", ".webm", ".mov", ".mkv"];
+const allowedExtensions = [
+  ".mp4",
+  ".webm",
+  ".mov",
+  ".mkv",
+  ".avi",
+  ".m4v",
+  ".mpg",
+  ".mpeg",
+  ".wmv",
+  ".ts"
+];
 
 function isPlayable(fileName) {
   const lower = String(fileName || "").toLowerCase();
   return allowedExtensions.some((ext) => lower.endsWith(ext));
+}
+
+const resumableKey = "pixmovie_resumable_uploads";
+
+function loadResumableSessions() {
+  try {
+    const raw = localStorage.getItem(resumableKey);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveResumableSessions(next) {
+  localStorage.setItem(resumableKey, JSON.stringify(next));
+}
+
+function buildSessionKey({ kind, file, seriesId, seasonNumber, episodeNumber }) {
+  return [
+    kind,
+    seriesId || "",
+    seasonNumber || "",
+    episodeNumber || "",
+    file.name,
+    file.size,
+    file.lastModified || 0
+  ].join("|");
+}
+
+function storeSession(key, payload) {
+  const sessions = loadResumableSessions();
+  sessions[key] = payload;
+  saveResumableSessions(sessions);
+}
+
+function clearSession(key) {
+  const sessions = loadResumableSessions();
+  delete sessions[key];
+  saveResumableSessions(sessions);
+}
+
+async function initResumableUpload(payload) {
+  return apiFetch("/uploads/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+}
+
+async function fetchUploadStatus(uploadId) {
+  return apiFetch(`/uploads/${uploadId}/status`);
+}
+
+async function uploadChunk(uploadId, chunk, start, end, total) {
+  const headers = {
+    "Content-Type": "application/octet-stream",
+    "Content-Range": `bytes ${start}-${end}/${total}`
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  const res = await fetch(`${API_BASE}/uploads/${uploadId}/chunk`, {
+    method: "PUT",
+    headers,
+    body: chunk
+  });
+  const raw = await res.text();
+  let data = {};
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { message: raw };
+    }
+  }
+  if (!res.ok) {
+    const error = new Error(data.message || `Chunk upload failed (${res.status})`);
+    error.status = res.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function notifyStatus(target, text) {
+  if (!target) return;
+  if (typeof target === "function") {
+    target(text);
+  } else {
+    target.textContent = text;
+  }
+}
+
+function waitForOnlineAndVisible(statusTarget) {
+  if (navigator.onLine && !document.hidden) {
+    notifyStatus(statusTarget, "Resuming upload...");
+    return Promise.resolve();
+  }
+  notifyStatus(
+    statusTarget,
+    navigator.onLine
+      ? "Upload paused while app is minimized. Return to continue."
+      : "Upload paused. Waiting for connection..."
+  );
+  return new Promise((resolve) => {
+    const handler = () => {
+      if (navigator.onLine && !document.hidden) {
+        window.removeEventListener("online", handler);
+        document.removeEventListener("visibilitychange", handler);
+        resolve();
+      }
+    };
+    window.addEventListener("online", handler);
+    document.addEventListener("visibilitychange", handler);
+  });
+}
+
+async function resumableUpload({
+  kind,
+  file,
+  title,
+  seriesId,
+  seasonNumber,
+  episodeNumber,
+  onProgress,
+  onStatus
+}) {
+  const sessionKey = buildSessionKey({ kind, file, seriesId, seasonNumber, episodeNumber });
+  const sessions = loadResumableSessions();
+  let session = sessions[sessionKey] || null;
+
+  if (!session) {
+    const init = await initResumableUpload({
+      kind,
+      title,
+      fileName: file.name,
+      size: file.size,
+      seriesId,
+      seasonNumber,
+      episodeNumber
+    });
+    session = {
+      uploadId: init.uploadId,
+      chunkSize: init.chunkSize,
+      fileName: file.name,
+      size: file.size,
+      lastModified: file.lastModified || 0,
+      kind,
+      seriesId,
+      seasonNumber,
+      episodeNumber
+    };
+    storeSession(sessionKey, session);
+  }
+
+  const status = await fetchUploadStatus(session.uploadId);
+  let offset = Number(status.received || 0);
+  const chunkSize = Number(session.chunkSize || status.chunkSize || 8 * 1024 * 1024);
+
+  if (onProgress) onProgress(offset, file.size);
+  if (onStatus && offset > 0) {
+    onStatus(`Resuming upload at ${formatBytesCompact(offset)}...`);
+  }
+
+  while (offset < file.size) {
+    await waitForOnlineAndVisible(onStatus);
+    const chunk = file.slice(offset, offset + chunkSize);
+    const end = offset + chunk.size - 1;
+    try {
+      const result = await uploadChunk(session.uploadId, chunk, offset, end, file.size);
+      offset = Number(result.received || end + 1);
+      if (onProgress) onProgress(offset, file.size);
+      storeSession(sessionKey, { ...session, received: offset });
+    } catch (err) {
+      if (err.status === 409 && err.data && typeof err.data.expected === "number") {
+        offset = Number(err.data.expected);
+        if (onProgress) onProgress(offset, file.size);
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  const movie = await apiFetch(`/uploads/${session.uploadId}/complete`, { method: "POST" });
+  clearSession(sessionKey);
+  return movie;
 }
 
 function setProgress(bar, percentEl, bytesEl, loaded, total) {
@@ -144,7 +341,8 @@ function buildSeasonPanel(series, seasonNumber) {
     fileInput.className = "input";
     fileInput.name = "video";
     fileInput.type = "file";
-    fileInput.accept = "video/mp4,video/webm,video/quicktime,video/x-matroska";
+    fileInput.accept =
+      "video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/mpeg,video/mp2t";
     fileInput.required = true;
 
     const button = document.createElement("button");
@@ -197,6 +395,17 @@ function buildSeasonPanel(series, seasonNumber) {
       }
       progressWrap.classList.remove("hidden");
       setProgress(progressBar, percent, bytes, 0, fileInput.files[0].size);
+      const resumeKey = buildSessionKey({
+        kind: "episode",
+        file: fileInput.files[0],
+        seriesId: series._id,
+        seasonNumber,
+        episodeNumber
+      });
+      const sessions = loadResumableSessions();
+      if (sessions[resumeKey]) {
+        message.textContent = "Resume available. Press upload to continue.";
+      }
     });
 
     return form;
@@ -242,68 +451,44 @@ async function handleEpisodeUpload(
     return;
   }
   if (!isPlayable(file.name)) {
-    message.textContent = "Unsupported format. Use MP4, WebM, MOV, or MKV.";
+    message.textContent =
+      "Unsupported format. Use MP4, WebM, MOV, MKV, AVI, MPG, MPEG, WMV, TS, or M4V.";
     return;
   }
-  if (!ffmpegAvailable && file.name.toLowerCase().endsWith(".mkv")) {
-    message.textContent = "FFmpeg is required to convert MKV. Install it first.";
+  if (!ffmpegAvailable) {
+    message.textContent = "FFmpeg is required to process uploads on this server.";
     if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
     return;
   }
 
-  const formData = new FormData(form);
-  formData.set("seasonNumber", String(seasonNumber));
-  if (episodeNumber) {
-    formData.set("episodeNumber", String(episodeNumber));
-  }
-
   progressWrap.classList.remove("hidden");
   setProgress(progressBar, percent, bytes, 0, file.size);
-  message.textContent = "Uploading...";
+  message.textContent = "Preparing upload...";
 
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", `${API_BASE}/series/${seriesId}/episodes`);
-  if (token) {
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-  }
-
-  xhr.upload.onprogress = (event) => {
-    if (event.lengthComputable) {
-      setProgress(progressBar, percent, bytes, event.loaded, event.total);
-    }
-  };
-
-  xhr.onload = async () => {
-    if (xhr.status >= 200 && xhr.status < 300) {
-      form.reset();
-      setProgress(progressBar, percent, bytes, 0, 0);
-      message.textContent = "Episode uploaded and seeding.";
-      await loadEpisodes(seriesId);
-    } else {
-      const card = form.closest(".series-card");
-      const alert = card ? card.querySelector(".series-alert") : null;
-      try {
-        const data = JSON.parse(xhr.responseText || "{}");
-        const errorMessage = data.message || "Upload failed.";
-        if (/ffmpeg/i.test(errorMessage) && alert) {
-          alert.textContent =
-            "FFmpeg is not installed on the server. Install it to auto-convert MKV files.";
-          alert.classList.remove("hidden");
-          message.textContent = "Conversion required. See alert above.";
-        } else {
-          message.textContent = errorMessage;
-        }
-      } catch {
-        message.textContent = "Upload failed.";
+  try {
+    const title = String(form.title?.value || "").trim() || `Episode ${episodeNumber}`;
+    await resumableUpload({
+      kind: "episode",
+      file,
+      title,
+      seriesId,
+      seasonNumber,
+      episodeNumber,
+      onProgress: (loaded, total) => {
+        setProgress(progressBar, percent, bytes, loaded, total);
+      },
+      onStatus: (text) => {
+        if (text) message.textContent = text;
       }
-    }
-  };
+    });
 
-  xhr.onerror = () => {
-    message.textContent = "Upload failed. Check your connection.";
-  };
-
-  xhr.send(formData);
+    form.reset();
+    setProgress(progressBar, percent, bytes, 0, 0);
+    message.textContent = "Episode uploaded. Processing now.";
+    await loadEpisodes(seriesId);
+  } catch (err) {
+    message.textContent = err.message || "Upload failed.";
+  }
 }
 
 async function loadSeries() {
@@ -460,59 +645,45 @@ uploadForm.addEventListener("submit", async (e) => {
     return;
   }
   if (!isPlayable(file.name)) {
-    uploadMessage.textContent = "Unsupported format. Use MP4, WebM, MOV, or MKV.";
+    uploadMessage.textContent =
+      "Unsupported format. Use MP4, WebM, MOV, MKV, AVI, MPG, MPEG, WMV, TS, or M4V.";
     return;
   }
-  if (!ffmpegAvailable && file.name.toLowerCase().endsWith(".mkv")) {
-    uploadMessage.textContent = "FFmpeg is required to convert MKV. Install it first.";
+  if (!ffmpegAvailable) {
+    uploadMessage.textContent = "FFmpeg is required to process uploads on this server.";
     if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
     return;
   }
 
-  const formData = new FormData(form);
   uploadBtn.disabled = true;
   uploadBtn.textContent = "Uploading...";
   uploadProgressWrap.classList.remove("hidden");
   setProgress(uploadProgressBar, uploadPercent, uploadBytes, 0, file.size);
-  uploadMessage.textContent = "Uploading...";
+  uploadMessage.textContent = "Preparing upload...";
 
-  const xhr = new XMLHttpRequest();
-  xhr.open("POST", `${API_BASE}/movies/upload`);
-  if (token) {
-    xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-  }
-
-  xhr.upload.onprogress = (event) => {
-    if (event.lengthComputable) {
-      setProgress(uploadProgressBar, uploadPercent, uploadBytes, event.loaded, event.total);
-    }
-  };
-
-  xhr.onload = () => {
-    uploadBtn.disabled = false;
-    uploadBtn.textContent = "Upload & Seed";
-    if (xhr.status >= 200 && xhr.status < 300) {
-      form.reset();
-      uploadFileInfo.textContent = "No file selected.";
-      setProgress(uploadProgressBar, uploadPercent, uploadBytes, 0, 0);
-      uploadMessage.textContent = "Upload complete. Seeding now.";
-    } else {
-      try {
-        const data = JSON.parse(xhr.responseText || "{}");
-        uploadMessage.textContent = data.message || "Upload failed.";
-      } catch {
-        uploadMessage.textContent = "Upload failed.";
+  try {
+    await resumableUpload({
+      kind: "movie",
+      file,
+      title: String(form.title?.value || "").trim(),
+      onProgress: (loaded, total) => {
+        setProgress(uploadProgressBar, uploadPercent, uploadBytes, loaded, total);
+      },
+      onStatus: (text) => {
+        if (text) uploadMessage.textContent = text;
       }
-    }
-  };
+    });
 
-  xhr.onerror = () => {
+    form.reset();
+    uploadFileInfo.textContent = "No file selected.";
+    setProgress(uploadProgressBar, uploadPercent, uploadBytes, 0, 0);
+    uploadMessage.textContent = "Upload complete. Processing now.";
+  } catch (err) {
+    uploadMessage.textContent = err.message || "Upload failed.";
+  } finally {
     uploadBtn.disabled = false;
     uploadBtn.textContent = "Upload & Seed";
-    uploadMessage.textContent = "Upload failed. Check your connection.";
-  };
-
-  xhr.send(formData);
+  }
 });
 
 uploadForm.querySelector('input[type="file"][name="video"]').addEventListener("change", (e) => {
@@ -526,6 +697,11 @@ uploadForm.querySelector('input[type="file"][name="video"]').addEventListener("c
   uploadFileInfo.textContent = `${file.name} (${formatBytesCompact(file.size)})`;
   uploadProgressWrap.classList.remove("hidden");
   setProgress(uploadProgressBar, uploadPercent, uploadBytes, 0, file.size);
+  const resumeKey = buildSessionKey({ kind: "movie", file });
+  const sessions = loadResumableSessions();
+  if (sessions[resumeKey]) {
+    uploadMessage.textContent = "Resume available. Press upload to continue.";
+  }
 });
 
 if (headerInput && headerPreview) {

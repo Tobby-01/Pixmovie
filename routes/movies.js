@@ -532,7 +532,14 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
 
     await User.findByIdAndUpdate(req.user.id, { $push: { uploadedMovies: movie._id } });
 
-    enqueue(() => processMovieUpload({ movieId: movie._id, inputPath: req.file.path }))
+    enqueue(() =>
+      processMovieUpload({
+        movieId: movie._id,
+        inputPath: req.file.path,
+        torrentClient: req.app.locals.torrentClient,
+        trackers: req.app.locals.trackers
+      })
+    )
       .catch((err) => {
         console.error("Movie processing failed:", err);
       });

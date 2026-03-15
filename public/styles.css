@@ -23,6 +23,8 @@ body {
     radial-gradient(circle at 20% 85%, #d1fae5, transparent 45%),
     linear-gradient(120deg, #f8fafc, #eef2f7);
   min-height: 100vh;
+  line-height: 1.6;
+  overflow-x: hidden;
 }
 
 .bg-glow {
@@ -38,6 +40,12 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 20px 6vw;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(248, 250, 252, 0.7);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .brand {
@@ -50,6 +58,7 @@ body {
 .nav-links {
   display: flex;
   gap: 18px;
+  flex-wrap: wrap;
 }
 
 .nav-links a {
@@ -73,6 +82,13 @@ body {
   color: white;
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   box-shadow: var(--shadow);
+}
+
+.auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .btn.small {
@@ -181,6 +197,13 @@ body {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.movie-grid .movie-card,
+.series-grid .series-card,
+.panel,
+.hero-banner {
+  animation: fadeUp 0.6s ease both;
 }
 
 .hero-banner {
@@ -684,6 +707,10 @@ body {
   margin-top: 10px;
 }
 
+.upload-info .movie-meta {
+  font-weight: 600;
+}
+
 .upload-stats {
   display: flex;
   justify-content: space-between;
@@ -937,6 +964,7 @@ body {
   .topbar {
     flex-direction: column;
     gap: 12px;
+    padding: 16px 6vw;
   }
 
   .nav-links {
@@ -959,5 +987,78 @@ body {
 
   .row-scroll {
     grid-auto-columns: minmax(200px, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .player-shell {
+    margin: 20px 4vw;
+    padding: 20px;
+  }
+
+  .stats-row {
+    gap: 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  .container {
+    padding: 0 5vw 40px;
+  }
+
+  .hero-banner {
+    min-height: 220px;
+  }
+
+  .hero-actions,
+  .player-actions,
+  .stats-row,
+  .card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .btn,
+  .icon-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .movie-grid,
+  .user-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-links {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand {
+    font-size: 26px;
+  }
+
+  .hero-banner h1 {
+    font-size: clamp(30px, 8vw, 48px);
+  }
+
+  .panel {
+    padding: 18px;
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
