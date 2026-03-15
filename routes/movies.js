@@ -217,6 +217,12 @@ router.get("/:id/stream", async (req, res) => {
       return res.status(404).json({ message: "Movie not found" });
     }
     if (movie.processingStatus && movie.processingStatus !== "ready") {
+      if (movie.processingStatus === "failed") {
+        return res.status(500).json({
+          status: movie.processingStatus,
+          message: movie.processingError || "Processing failed"
+        });
+      }
       return res.status(202).json({ status: movie.processingStatus });
     }
 
@@ -250,6 +256,12 @@ router.get("/:id/hls/*", async (req, res) => {
     }
 
     if (movie.processingStatus && movie.processingStatus !== "ready") {
+      if (movie.processingStatus === "failed") {
+        return res.status(500).json({
+          status: movie.processingStatus,
+          message: movie.processingError || "Processing failed"
+        });
+      }
       return res.status(202).json({ status: movie.processingStatus });
     }
 
@@ -282,6 +294,12 @@ router.get("/:id/thumbnail", async (req, res) => {
       return res.status(404).json({ message: "Movie not found" });
     }
     if (movie.processingStatus && movie.processingStatus !== "ready") {
+      if (movie.processingStatus === "failed") {
+        return res.status(500).json({
+          status: movie.processingStatus,
+          message: movie.processingError || "Processing failed"
+        });
+      }
       return res.status(202).json({ status: movie.processingStatus });
     }
 
@@ -310,6 +328,12 @@ router.get("/:id/download", async (req, res) => {
       return res.status(404).json({ message: "Movie not found" });
     }
     if (movie.processingStatus && movie.processingStatus !== "ready") {
+      if (movie.processingStatus === "failed") {
+        return res.status(500).json({
+          status: movie.processingStatus,
+          message: movie.processingError || "Processing failed"
+        });
+      }
       return res.status(202).json({ status: movie.processingStatus });
     }
 
