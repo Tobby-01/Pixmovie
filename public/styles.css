@@ -15,6 +15,10 @@
   box-sizing: border-box;
 }
 
+.hidden {
+  display: none !important;
+}
+
 body {
   margin: 0;
   font-family: "Space Grotesk", "Segoe UI", sans-serif;
@@ -176,6 +180,44 @@ body {
 
 .panel h2 {
   margin-top: 0;
+}
+
+.resume-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.resume-list {
+  display: grid;
+  gap: 12px;
+}
+
+.resume-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--mist);
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
+}
+
+.resume-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.resume-meta {
+  font-size: 13px;
+  color: var(--slate);
+}
+
+.resume-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .form-grid {

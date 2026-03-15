@@ -84,6 +84,12 @@ function setNavUser(user) {
 
 bindGuestStream();
 
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  });
+}
+
 function requireAuth() {
   if (!token) {
     window.location.href = "index.html";

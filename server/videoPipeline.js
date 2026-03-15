@@ -78,25 +78,41 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
 
   const compressedPath = path.join(movieDir, "compressed.mp4");
   const lowPath = path.join(movieDir, "low.mp4");
+  const midPath = path.join(movieDir, "mid.mp4");
   const thumbnailPath = path.join(movieDir, "thumbnail.jpg");
 
   try {
-    await compressToH265(inputPath, compressedPath);
-    await compressToH265(inputPath, lowPath, {
-      crf: "30",
+    await compressToH265(inputPath, compressedPath, {
+      crf: "28",
+      audioBitrate: "128k",
+      scaleFilter: "scale=if(gt(ih,720),-2,iw):if(gt(ih,720),720,ih)"
+    });
+    await compressToH265(inputPath, midPath, {
+      crf: "29",
       audioBitrate: "96k",
-      scaleFilter: "scale=if(gt(ih,360),-2,iw):if(gt(ih,360),360,ih)"
+      scaleFilter: "scale=if(gt(ih,480),-2,iw):if(gt(ih,480),480,ih)"
+    });
+    await compressToH265(inputPath, lowPath, {
+      crf: "31",
+      audioBitrate: "64k",
+      scaleFilter: "scale=if(gt(ih,240),-2,iw):if(gt(ih,240),240,ih)"
     });
     await generateThumbnail(compressedPath, thumbnailPath);
-    const standardDir = path.join(movieDir, "standard");
-    const lowDir = path.join(movieDir, "low");
+    const hls720Dir = path.join(movieDir, "hls", "720");
+    const hls480Dir = path.join(movieDir, "hls", "480");
+    const hls240Dir = path.join(movieDir, "hls", "240");
 
-    await packageToHls(compressedPath, standardDir, {
+    await packageToHls(compressedPath, hls720Dir, {
       outputName: "index.m3u8",
       segmentTime: 10,
       segmentPattern: "segment%03d.ts"
     });
-    await packageToHls(lowPath, lowDir, {
+    await packageToHls(midPath, hls480Dir, {
+      outputName: "index.m3u8",
+      segmentTime: 10,
+      segmentPattern: "segment%03d.ts"
+    });
+    await packageToHls(lowPath, hls240Dir, {
       outputName: "index.m3u8",
       segmentTime: 10,
       segmentPattern: "segment%03d.ts"
@@ -106,10 +122,12 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
     const masterContent = [
       "#EXTM3U",
       "#EXT-X-VERSION:3",
-      "#EXT-X-STREAM-INF:BANDWIDTH=600000,RESOLUTION=640x360",
-      "low/index.m3u8",
+      "#EXT-X-STREAM-INF:BANDWIDTH=350000,RESOLUTION=426x240",
+      "hls/240/index.m3u8",
+      "#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=854x480",
+      "hls/480/index.m3u8",
       "#EXT-X-STREAM-INF:BANDWIDTH=1500000,RESOLUTION=1280x720",
-      "standard/index.m3u8",
+      "hls/720/index.m3u8",
       ""
     ].join("\n");
     fs.writeFileSync(masterPath, masterContent);
@@ -183,6 +201,7 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
       safeRemoveDir(path.dirname(normalizedInput));
     }
     safeUnlink(lowPath);
+    safeUnlink(midPath);
     if (isR2Enabled()) {
       safeRemoveDir(movieDir);
     }

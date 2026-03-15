@@ -413,7 +413,7 @@ async function boot() {
         : "Starting stream...";
 
       const hlsUrl = options.lowData
-        ? `${apiBase}/movies/${movie._id}/hls/low/index.m3u8`
+        ? `${apiBase}/movies/${movie._id}/hls/240/index.m3u8`
         : `${apiBase}/movies/${movie._id}/hls/master.m3u8`;
 
       const ready = await checkHlsReady(hlsUrl);

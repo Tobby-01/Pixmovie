@@ -13,6 +13,9 @@ const uploadBtn = document.getElementById("uploadBtn");
 const headerInput = document.getElementById("headerInput");
 const headerPreview = document.getElementById("headerPreview");
 const ffmpegBanner = document.getElementById("ffmpegBanner");
+const resumePanel = document.getElementById("resumePanel");
+const resumeList = document.getElementById("resumeList");
+const resumeEmpty = document.getElementById("resumeEmpty");
 let ffmpegAvailable = true;
 let headerObjectUrl = null;
 
@@ -61,6 +64,18 @@ function saveResumableSessions(next) {
   localStorage.setItem(resumableKey, JSON.stringify(next));
 }
 
+async function registerUploadSync() {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if (registration && "sync" in registration) {
+      await registration.sync.register("pixmovie-upload");
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function buildSessionKey({ kind, file, seriesId, seasonNumber, episodeNumber }) {
   return [
     kind,
@@ -77,12 +92,14 @@ function storeSession(key, payload) {
   const sessions = loadResumableSessions();
   sessions[key] = payload;
   saveResumableSessions(sessions);
+  renderResumePanel();
 }
 
 function clearSession(key) {
   const sessions = loadResumableSessions();
   delete sessions[key];
   saveResumableSessions(sessions);
+  renderResumePanel();
 }
 
 async function initResumableUpload(payload) {
@@ -148,6 +165,7 @@ function waitForOnlineAndVisible(statusTarget) {
       ? "Upload paused while app is minimized. Return to continue."
       : "Upload paused. Waiting for connection..."
   );
+  registerUploadSync();
   return new Promise((resolve) => {
     const handler = () => {
       if (navigator.onLine && !document.hidden) {
@@ -161,6 +179,130 @@ function waitForOnlineAndVisible(statusTarget) {
   });
 }
 
+function renderResumePanel() {
+  if (!resumeList || !resumeEmpty) return;
+  const sessions = loadResumableSessions();
+  const entries = Object.entries(sessions);
+  resumeList.innerHTML = "";
+  if (!entries.length) {
+    resumeEmpty.classList.remove("hidden");
+    return;
+  }
+  resumeEmpty.classList.add("hidden");
+
+  entries.forEach(([key, session]) => {
+    const card = document.createElement("div");
+    card.className = "resume-card";
+
+    const header = document.createElement("div");
+    header.className = "resume-header";
+
+    const title = document.createElement("strong");
+    title.textContent = session.fileName || "Untitled upload";
+
+    const meta = document.createElement("div");
+    meta.className = "resume-meta";
+    const received = Number(session.received || 0);
+    const size = Number(session.size || 0);
+    const percent = size ? Math.floor((received / size) * 100) : 0;
+    const kindLabel = session.kind === "episode" ? "Episode" : "Movie";
+    const episodeLabel =
+      session.kind === "episode"
+        ? ` • S${session.seasonNumber || 1}E${session.episodeNumber || "?"}`
+        : "";
+    meta.textContent = `${kindLabel}${episodeLabel} • ${formatBytesCompact(
+      received
+    )} / ${formatBytesCompact(size)} • ${percent}%`;
+
+    header.append(title, meta);
+
+    const message = document.createElement("div");
+    message.className = "movie-meta";
+    message.textContent = "Waiting for file to resume.";
+
+    const actions = document.createElement("div");
+    actions.className = "resume-actions";
+
+    const resumeBtn = document.createElement("button");
+    resumeBtn.className = "btn small";
+    resumeBtn.type = "button";
+    resumeBtn.textContent = "Resume";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn ghost small";
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Cancel";
+
+    resumeBtn.addEventListener("click", () => resumeSession(key, session, message, resumeBtn));
+    cancelBtn.addEventListener("click", () => cancelSession(key, session, message));
+
+    actions.append(resumeBtn, cancelBtn);
+    card.append(header, message, actions);
+    resumeList.appendChild(card);
+  });
+}
+
+function cancelSession(key, session, messageEl) {
+  if (messageEl) messageEl.textContent = "Cancelling...";
+  apiFetch(`/uploads/${session.uploadId}`, { method: "DELETE" })
+    .catch(() => {})
+    .finally(() => {
+      clearSession(key);
+    });
+}
+
+function resumeSession(key, session, messageEl, buttonEl) {
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept =
+    "video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,video/mpeg,video/mp2t";
+  picker.addEventListener("change", async () => {
+    const file = picker.files[0];
+    if (!file) return;
+    if (file.name !== session.fileName || file.size !== Number(session.size || 0)) {
+      if (messageEl) {
+        messageEl.textContent = "Selected file does not match this upload.";
+      }
+      return;
+    }
+    if (!ffmpegAvailable) {
+      if (messageEl) {
+        messageEl.textContent = "FFmpeg is required to process uploads on this server.";
+      }
+      if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
+      return;
+    }
+    if (buttonEl) buttonEl.disabled = true;
+    if (messageEl) messageEl.textContent = "Resuming upload...";
+    try {
+      await resumableUpload({
+        kind: session.kind,
+        file,
+        title: session.title || "",
+        seriesId: session.seriesId,
+        seasonNumber: session.seasonNumber,
+        episodeNumber: session.episodeNumber,
+        onProgress: (loaded, total) => {
+          if (messageEl) {
+            const percent = total ? Math.floor((loaded / total) * 100) : 0;
+            messageEl.textContent = `Uploading... ${percent}%`;
+          }
+        },
+        onStatus: (text) => {
+          if (messageEl && text) messageEl.textContent = text;
+        }
+      });
+      clearSession(key);
+      if (messageEl) messageEl.textContent = "Upload complete. Processing now.";
+    } catch (err) {
+      if (messageEl) messageEl.textContent = err.message || "Upload failed.";
+    } finally {
+      if (buttonEl) buttonEl.disabled = false;
+    }
+  });
+  picker.click();
+}
+
 async function resumableUpload({
   kind,
   file,
@@ -171,6 +313,7 @@ async function resumableUpload({
   onProgress,
   onStatus
 }) {
+  registerUploadSync();
   const sessionKey = buildSessionKey({ kind, file, seriesId, seasonNumber, episodeNumber });
   const sessions = loadResumableSessions();
   let session = sessions[sessionKey] || null;
@@ -191,6 +334,7 @@ async function resumableUpload({
       fileName: file.name,
       size: file.size,
       lastModified: file.lastModified || 0,
+      title: title || "",
       kind,
       seriesId,
       seasonNumber,
@@ -733,6 +877,15 @@ async function boot() {
   if (!user) return;
   await checkFfmpeg();
   await loadSeries();
+  renderResumePanel();
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "resume-uploads") {
+      renderResumePanel();
+    }
+  });
 }
 
 boot();
