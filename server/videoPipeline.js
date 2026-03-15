@@ -6,6 +6,26 @@ const { isR2Enabled, uploadLocalFile, contentTypeFromKey } = require("./r2");
 
 const moviesDir = path.join(__dirname, "..", "movies");
 const resumableRoot = path.join(moviesDir, "_uploads", "resumable");
+const activeJobs = new Map();
+
+function cancelProcessing(movieId, reason = "cancelled") {
+  const key = String(movieId);
+  const job = activeJobs.get(key);
+  if (!job) return false;
+  job.cancelled = true;
+  job.cancelReason = reason;
+  if (job.abortController) {
+    job.abortController.abort();
+  }
+  if (job.currentProcess && !job.currentProcess.killed) {
+    job.currentProcess.kill("SIGKILL");
+  }
+  if (job.timeout) {
+    clearTimeout(job.timeout);
+    job.timeout = null;
+  }
+  return true;
+}
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
@@ -73,12 +93,27 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
     throw new Error("Movie record not found for processing.");
   }
 
+  const jobKey = String(movieId);
+  const abortController = new AbortController();
+  const job = {
+    abortController,
+    cancelled: false,
+    cancelReason: ""
+  };
+  activeJobs.set(jobKey, job);
+
   const movieDir = path.join(moviesDir, String(movieId));
   ensureDir(movieDir);
 
   const profile = String(process.env.PROCESSING_PROFILE || "fast").toLowerCase();
   const useFullLadder = profile === "ladder" || profile === "full";
   const preset = profile === "fast" ? "superfast" : "fast";
+  const timeoutMinutes = Number(process.env.PROCESSING_TIMEOUT_MINUTES || 30);
+  if (Number.isFinite(timeoutMinutes) && timeoutMinutes > 0) {
+    job.timeout = setTimeout(() => {
+      cancelProcessing(movieId, "timeout");
+    }, timeoutMinutes * 60 * 1000);
+  }
 
   const compressedPath = path.join(movieDir, "compressed.mp4");
   const lowPath = path.join(movieDir, "low.mp4");
@@ -90,6 +125,7 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
     const updateProcessing = (() => {
       let lastUpdate = 0;
       return async (payload, force = false) => {
+        if (job.cancelled) return;
         const now = Date.now();
         if (!force && now - lastUpdate < 3000) return;
         lastUpdate = now;
@@ -102,7 +138,16 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
       };
     })();
 
+    const ensureActive = () => {
+      if (job.cancelled) {
+        throw new Error(
+          job.cancelReason === "timeout" ? "Processing timed out" : "Processing cancelled"
+        );
+      }
+    };
+
     await updateProcessing({ processingStage: "encode-720", processingPercent: 0 }, true);
+    ensureActive();
     await compressToH265(inputPath, compressedPath, {
       crf: "28",
       preset,
@@ -114,10 +159,15 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
           processingStage: "encode-720",
           processingPercent: Math.round(percent),
           processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
-        })
+        }),
+      onStart: (child) => {
+        job.currentProcess = child;
+      },
+      signal: abortController.signal
     });
     if (useFullLadder) {
       await updateProcessing({ processingStage: "encode-480", processingPercent: 0 }, true);
+      ensureActive();
       await compressToH265(inputPath, midPath, {
         crf: "29",
         preset,
@@ -129,10 +179,15 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
             processingStage: "encode-480",
             processingPercent: Math.round(percent),
             processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
-          })
+          }),
+        onStart: (child) => {
+          job.currentProcess = child;
+        },
+        signal: abortController.signal
       });
     }
     await updateProcessing({ processingStage: "encode-240", processingPercent: 0 }, true);
+    ensureActive();
     await compressToH265(inputPath, lowPath, {
       crf: "31",
       preset,
@@ -144,30 +199,52 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
           processingStage: "encode-240",
           processingPercent: Math.round(percent),
           processingEtaSeconds: etaSeconds != null ? Math.round(etaSeconds) : null
-        })
+        }),
+      onStart: (child) => {
+        job.currentProcess = child;
+      },
+      signal: abortController.signal
     });
     await updateProcessing({ processingStage: "packaging", processingPercent: 0 }, true);
-    await generateThumbnail(compressedPath, thumbnailPath);
+    ensureActive();
+    await generateThumbnail(compressedPath, thumbnailPath, {
+      onStart: (child) => {
+        job.currentProcess = child;
+      },
+      signal: abortController.signal
+    });
     const hls720Dir = path.join(movieDir, "hls", "720");
     const hls240Dir = path.join(movieDir, "hls", "240");
 
     await packageToHls(compressedPath, hls720Dir, {
       outputName: "index.m3u8",
       segmentTime: 10,
-      segmentPattern: "segment%03d.ts"
+      segmentPattern: "segment%03d.ts",
+      onStart: (child) => {
+        job.currentProcess = child;
+      },
+      signal: abortController.signal
     });
     if (useFullLadder) {
       const hls480Dir = path.join(movieDir, "hls", "480");
       await packageToHls(midPath, hls480Dir, {
         outputName: "index.m3u8",
         segmentTime: 10,
-        segmentPattern: "segment%03d.ts"
+        segmentPattern: "segment%03d.ts",
+        onStart: (child) => {
+          job.currentProcess = child;
+        },
+        signal: abortController.signal
       });
     }
     await packageToHls(lowPath, hls240Dir, {
       outputName: "index.m3u8",
       segmentTime: 10,
-      segmentPattern: "segment%03d.ts"
+      segmentPattern: "segment%03d.ts",
+      onStart: (child) => {
+        job.currentProcess = child;
+      },
+      signal: abortController.signal
     });
 
     const masterPath = path.join(movieDir, "master.m3u8");
@@ -255,6 +332,9 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
   } catch (err) {
     movie.processingStatus = "failed";
     movie.processingError = err.message || "Processing failed";
+    movie.processingStage = "";
+    movie.processingPercent = 0;
+    movie.processingEtaSeconds = null;
     await movie.save();
     throw err;
   } finally {
@@ -270,9 +350,13 @@ async function processMovieUpload({ movieId, inputPath, torrentClient, trackers 
     if (isR2Enabled()) {
       safeRemoveDir(movieDir);
     }
+    if (job.timeout) {
+      clearTimeout(job.timeout);
+    }
+    activeJobs.delete(jobKey);
   }
 
   return movie;
 }
 
-module.exports = { processMovieUpload };
+module.exports = { processMovieUpload, cancelProcessing };

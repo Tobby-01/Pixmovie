@@ -20,6 +20,8 @@ function parseTimeToSeconds(value) {
 function runFfmpeg(args, errorMessage, options = {}) {
   const onProgress = options.onProgress;
   const durationSec = Number.isFinite(options.durationSec) ? options.durationSec : null;
+  const onStart = options.onStart;
+  const signal = options.signal;
   return new Promise((resolve, reject) => {
     const ffmpeg = spawn("ffmpeg", args, { windowsHide: true });
     let errorText = "";
@@ -43,6 +45,24 @@ function runFfmpeg(args, errorMessage, options = {}) {
         timeSeconds: progressTime,
         durationSeconds: durationSec
       });
+    }
+
+    if (typeof onStart === "function") {
+      onStart(ffmpeg);
+    }
+
+    if (signal) {
+      if (signal.aborted) {
+        ffmpeg.kill("SIGKILL");
+      } else {
+        signal.addEventListener(
+          "abort",
+          () => {
+            ffmpeg.kill("SIGKILL");
+          },
+          { once: true }
+        );
+      }
     }
 
     ffmpeg.stderr.on("data", (data) => {
@@ -146,7 +166,9 @@ function compressToH265(inputPath, outputPath, options = {}) {
 
       await runFfmpeg(args, "Video compression failed.", {
         onProgress: options.onProgress,
-        durationSec: options.durationSec
+        durationSec: options.durationSec,
+        onStart: options.onStart,
+        signal: options.signal
       });
       resolve(path.normalize(outputPath));
     } catch (err) {
@@ -184,7 +206,10 @@ function packageToHls(inputPath, outputDir, options = {}) {
         outputPath
       ];
 
-      await runFfmpeg(args, "HLS packaging failed.");
+      await runFfmpeg(args, "HLS packaging failed.", {
+        onStart: options.onStart,
+        signal: options.signal
+      });
       if (!fs.existsSync(outputPath)) {
         throw new Error("HLS playlist was not created.");
       }
@@ -195,7 +220,7 @@ function packageToHls(inputPath, outputDir, options = {}) {
   });
 }
 
-function generateThumbnail(inputPath, outputPath) {
+function generateThumbnail(inputPath, outputPath, options = {}) {
   return new Promise(async (resolve, reject) => {
     try {
       ensureDir(path.dirname(outputPath));
@@ -212,7 +237,10 @@ function generateThumbnail(inputPath, outputPath) {
         outputPath
       ];
 
-      await runFfmpeg(args, "Thumbnail generation failed.");
+      await runFfmpeg(args, "Thumbnail generation failed.", {
+        onStart: options.onStart,
+        signal: options.signal
+      });
       resolve(path.normalize(outputPath));
     } catch (err) {
       reject(err);
