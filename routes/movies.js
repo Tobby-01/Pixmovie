@@ -516,15 +516,32 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
         });
     }
 
+    const compressRequested = String(req.body.compress || "") === "1";
+    const inputBytes = Number(req.file.size || 0);
+
     let finalPath = req.file.path;
     let finalName = req.file.filename;
     let finalSize = req.file.size;
+    let compression = null;
 
-    if (!isPlayableFile(req.file.originalname)) {
+    if (compressRequested || !isPlayableFile(req.file.originalname)) {
       try {
-        finalPath = await transcodeToMp4(req.file.path);
+        const needsNewFile = compressRequested || !req.file.originalname.toLowerCase().endsWith(".mp4");
+        const outputPath = needsNewFile ? undefined : `${req.file.path}.compressed.mp4`;
+        finalPath = await transcodeToMp4(req.file.path, {
+          outputPath,
+          crf: compressRequested ? 28 : 23,
+          preset: "veryfast",
+          audioBitrate: compressRequested ? "96k" : "128k"
+        });
         finalName = path.basename(finalPath);
         finalSize = fs.statSync(finalPath).size;
+        compression = {
+          originalBytes: inputBytes,
+          finalBytes: finalSize,
+          savedBytes: Math.max(0, inputBytes - finalSize),
+          savedPercent: inputBytes ? Math.max(0, Math.round(((inputBytes - finalSize) / inputBytes) * 100)) : 0
+        };
         safeUnlink(req.file.path);
       } catch (err) {
         return res.status(500).json({ message: err.message || "Transcoding failed" });
@@ -566,10 +583,67 @@ router.post("/upload", auth, upload.single("video"), async (req, res) => {
 
     await User.findByIdAndUpdate(req.user.id, { $push: { uploadedMovies: movie._id } });
 
-    return res.json(movie);
+    const payload = movie && typeof movie.toObject === "function" ? movie.toObject() : movie;
+    if (compression) payload.compression = compression;
+    return res.json(payload);
   } catch (err) {
     console.error("Movie upload failed:", err);
     return res.status(500).json({ message: err.message || "Upload failed" });
+  }
+});
+
+router.patch("/:id", auth, async (req, res) => {
+  try {
+    const movie = await Movie.findById(req.params.id);
+    if (!movie) {
+      return res.status(404).json({ message: "Movie not found" });
+    }
+    if (String(movie.uploader) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Not allowed to update this movie" });
+    }
+
+    const next = {};
+    if (req.body && Object.prototype.hasOwnProperty.call(req.body, "title")) {
+      const title = String(req.body.title || "").trim();
+      if (!title) {
+        return res.status(400).json({ message: "title cannot be empty" });
+      }
+      next.title = title;
+    }
+
+    if (movie.isEpisode) {
+      if (req.body && Object.prototype.hasOwnProperty.call(req.body, "episodeNumber")) {
+        const episodeNumber = Number(req.body.episodeNumber || 0);
+        if (!Number.isFinite(episodeNumber) || episodeNumber < 1) {
+          return res.status(400).json({ message: "episodeNumber must be a positive number" });
+        }
+        next.episodeNumber = episodeNumber;
+      }
+      if (req.body && Object.prototype.hasOwnProperty.call(req.body, "seasonNumber")) {
+        const seasonNumber = Number(req.body.seasonNumber || 0);
+        if (!Number.isFinite(seasonNumber) || seasonNumber < 1) {
+          return res.status(400).json({ message: "seasonNumber must be a positive number" });
+        }
+        next.seasonNumber = seasonNumber;
+      }
+    }
+
+    if (!Object.keys(next).length) {
+      const payload = movie && typeof movie.toObject === "function" ? movie.toObject() : movie;
+      return res.json(payload);
+    }
+
+    if (typeof movie.save === "function") {
+      Object.assign(movie, next);
+      await movie.save();
+      const payload = movie.toObject();
+      return res.json(payload);
+    }
+
+    const updated = await Movie.findByIdAndUpdate(req.params.id, next, { new: true });
+    return res.json(updated);
+  } catch (err) {
+    return res.status(500).json({ message: err.message || "Update failed" });
   }
 });
 

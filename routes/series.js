@@ -263,16 +263,30 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
       episodeNumber = max + 1;
     }
 
+    const compressRequested = String(req.body.compress || "") === "1";
     const title = String(req.body.title || "").trim() || `Episode ${episodeNumber}`;
+    const inputBytes = Number(req.file.size || 0);
+
     let finalPath = req.file.path;
     let finalName = req.file.filename;
     let finalSize = req.file.size;
+    let compression = null;
 
-    if (!isPlayableFile(req.file.originalname)) {
+    if (compressRequested || !isPlayableFile(req.file.originalname)) {
       try {
-        finalPath = await transcodeToMp4(req.file.path);
+        finalPath = await transcodeToMp4(req.file.path, {
+          crf: compressRequested ? 28 : 23,
+          preset: "veryfast",
+          audioBitrate: compressRequested ? "96k" : "128k"
+        });
         finalName = path.basename(finalPath);
         finalSize = fs.statSync(finalPath).size;
+        compression = {
+          originalBytes: inputBytes,
+          finalBytes: finalSize,
+          savedBytes: Math.max(0, inputBytes - finalSize),
+          savedPercent: inputBytes ? Math.max(0, Math.round(((inputBytes - finalSize) / inputBytes) * 100)) : 0
+        };
         if (fs.existsSync(req.file.path)) {
           fs.unlinkSync(req.file.path);
         }
@@ -331,7 +345,9 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
 
     await User.findByIdAndUpdate(req.user.id, { $push: { uploadedMovies: movie._id } });
 
-    return res.json(movie);
+    const payload = movie && typeof movie.toObject === "function" ? movie.toObject() : movie;
+    if (compression) payload.compression = compression;
+    return res.json(payload);
   } catch (err) {
     console.error("Episode upload failed:", err);
     return res.status(500).json({ message: err.message || "Episode upload failed" });

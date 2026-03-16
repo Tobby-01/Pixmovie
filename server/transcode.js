@@ -2,23 +2,42 @@ const { spawn } = require("child_process");
 const path = require("path");
 const { spawnSync } = require("child_process");
 
-function transcodeToMp4(inputPath) {
+function defaultCompressedOutputPath(inputPath) {
+  const ext = path.extname(inputPath);
+  const base = ext ? inputPath.slice(0, -ext.length) : inputPath;
+  return `${base}_compressed.mp4`;
+}
+
+function transcodeToMp4(inputPath, options = {}) {
   return new Promise((resolve, reject) => {
-    const outputPath = inputPath.replace(/\.[^/.]+$/, ".mp4");
+    const requestedOutput =
+      typeof options.outputPath === "string" && options.outputPath
+        ? options.outputPath
+        : inputPath.replace(/\.[^/.]+$/, ".mp4");
+    const outputPath =
+      path.normalize(requestedOutput) === path.normalize(inputPath)
+        ? defaultCompressedOutputPath(inputPath)
+        : requestedOutput;
+    const crf = options.crf != null ? String(options.crf) : "23";
+    const preset = options.preset != null ? String(options.preset) : "veryfast";
+    const audioBitrate = options.audioBitrate != null ? String(options.audioBitrate) : "128k";
+    const videoFilter =
+      typeof options.videoFilter === "string" && options.videoFilter ? options.videoFilter : "";
     const args = [
       "-y",
       "-i",
       inputPath,
+      ...(videoFilter ? ["-vf", videoFilter] : []),
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      preset,
       "-crf",
-      "23",
+      crf,
       "-c:a",
       "aac",
       "-b:a",
-      "128k",
+      audioBitrate,
       "-movflags",
       "+faststart",
       outputPath

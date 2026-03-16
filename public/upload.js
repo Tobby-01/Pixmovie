@@ -28,11 +28,72 @@ function formatBytesCompact(bytes) {
   return `${value.toFixed(value >= 10 || index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
+function compressionSummary(compression) {
+  if (!compression) return "";
+  const original = Number(compression.originalBytes || 0);
+  const finalBytes = Number(compression.finalBytes || 0);
+  if (!original || !finalBytes) return "";
+  const savedPercent = Number(compression.savedPercent || 0);
+  return `Compressed ${formatBytesCompact(original)} -> ${formatBytesCompact(finalBytes)} (${savedPercent}% smaller).`;
+}
+
 const allowedExtensions = [".mp4", ".webm", ".mov", ".mkv"];
 
 function isPlayable(fileName) {
   const lower = String(fileName || "").toLowerCase();
   return allowedExtensions.some((ext) => lower.endsWith(ext));
+}
+
+function stripExtension(fileName) {
+  return String(fileName || "").replace(/\.[^/.]+$/, "");
+}
+
+function normalizeSpaces(value) {
+  return String(value || "").replace(/[\s._-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function guessEpisodeNumberFromName(fileName, seasonNumber) {
+  const raw = stripExtension(fileName);
+
+  const match1 = raw.match(/s(\d{1,2})\s*e(\d{1,3})/i);
+  if (match1) {
+    const season = Number(match1[1]);
+    const episode = Number(match1[2]);
+    if (!Number.isFinite(episode) || episode < 1) return null;
+    if (Number.isFinite(seasonNumber) && season && seasonNumber !== season) return null;
+    return episode;
+  }
+
+  const match2 = raw.match(/(\d{1,2})x(\d{1,3})/i);
+  if (match2) {
+    const season = Number(match2[1]);
+    const episode = Number(match2[2]);
+    if (!Number.isFinite(episode) || episode < 1) return null;
+    if (Number.isFinite(seasonNumber) && season && seasonNumber !== season) return null;
+    return episode;
+  }
+
+  const match3 = raw.match(/(?:episode|ep)\s*(\d{1,3})/i);
+  if (match3) {
+    const episode = Number(match3[1]);
+    if (Number.isFinite(episode) && episode > 0) return episode;
+  }
+
+  return null;
+}
+
+function guessEpisodeTitleFromName(fileName, seriesTitle) {
+  let text = normalizeSpaces(stripExtension(fileName));
+  if (seriesTitle) {
+    const safeSeries = normalizeSpaces(seriesTitle);
+    if (safeSeries && text.toLowerCase().startsWith(safeSeries.toLowerCase())) {
+      text = text.slice(safeSeries.length).trim();
+    }
+  }
+  text = text.replace(/\bS\d{1,2}\s*E\d{1,3}\b/gi, "").replace(/\b\d{1,2}x\d{1,3}\b/gi, "");
+  text = text.replace(/\b(episode|ep)\s*\d{1,3}\b/gi, "");
+  text = normalizeSpaces(text);
+  return text;
 }
 
 function setProgress(bar, percentEl, bytesEl, loaded, total) {
@@ -109,6 +170,72 @@ function buildSeasonPanel(series, seasonNumber) {
   controls.append(countInput, generateBtn);
   header.append(title, controls);
 
+  const bulkPanel = document.createElement("div");
+  bulkPanel.className = "bulk-panel";
+
+  const bulkHeader = document.createElement("div");
+  bulkHeader.className = "bulk-header";
+
+  const bulkTitle = document.createElement("div");
+  bulkTitle.className = "bulk-title";
+  bulkTitle.textContent = "Upload a whole season";
+
+  const bulkActions = document.createElement("div");
+  bulkActions.className = "bulk-actions";
+
+  const bulkPickBtn = document.createElement("button");
+  bulkPickBtn.className = "btn ghost small";
+  bulkPickBtn.type = "button";
+  bulkPickBtn.textContent = "Select Episodes";
+
+  const bulkUploadBtn = document.createElement("button");
+  bulkUploadBtn.className = "btn small";
+  bulkUploadBtn.type = "button";
+  bulkUploadBtn.textContent = "Upload Selected";
+  bulkUploadBtn.disabled = true;
+
+  const bulkClearBtn = document.createElement("button");
+  bulkClearBtn.className = "btn ghost small";
+  bulkClearBtn.type = "button";
+  bulkClearBtn.textContent = "Clear";
+  bulkClearBtn.disabled = true;
+
+  bulkActions.append(bulkPickBtn, bulkUploadBtn, bulkClearBtn);
+  bulkHeader.append(bulkTitle, bulkActions);
+
+  const bulkHelp = document.createElement("div");
+  bulkHelp.className = "movie-meta";
+  bulkHelp.textContent =
+    "Select multiple episode files. PixMovie will guess episode numbers/titles from filenames, and you can edit them before uploading.";
+
+  const bulkCompressLabel = document.createElement("label");
+  bulkCompressLabel.className = "check-row";
+  const bulkCompress = document.createElement("input");
+  bulkCompress.type = "checkbox";
+  bulkCompress.value = "1";
+  bulkCompressLabel.append(bulkCompress, " Compress");
+
+  const bulkInput = document.createElement("input");
+  bulkInput.type = "file";
+  bulkInput.multiple = true;
+  bulkInput.accept = "video/mp4,video/webm,video/quicktime,video/x-matroska";
+  bulkInput.className = "hidden";
+
+  const bulkList = document.createElement("div");
+  bulkList.className = "bulk-list";
+
+  const bulkMessage = document.createElement("p");
+  bulkMessage.className = "movie-meta";
+
+  bulkPanel.append(
+    bulkHeader,
+    bulkHelp,
+    bulkCompressLabel,
+    bulkInput,
+    bulkList,
+    bulkMessage
+  );
+
   const slots = document.createElement("div");
   slots.className = "episode-slots";
 
@@ -117,7 +244,241 @@ function buildSeasonPanel(series, seasonNumber) {
   episodeList.dataset.seriesId = series._id;
   episodeList.dataset.seasonNumber = seasonNumber;
 
-  panel.append(header, slots, episodeList);
+  panel.append(header, bulkPanel, slots, episodeList);
+
+  let bulkItems = [];
+  let bulkUploading = false;
+
+  function setBulkMessage(text) {
+    bulkMessage.textContent = text || "";
+  }
+
+  function uploadEpisodeFromFile({
+    seriesId,
+    seasonNumber,
+    episodeNumber,
+    title,
+    file,
+    progressWrap,
+    progressBar,
+    percent,
+    bytes,
+    message,
+    compress
+  }) {
+    return new Promise((resolve, reject) => {
+      const formData = new FormData();
+      formData.set("seasonNumber", String(seasonNumber));
+      formData.set("episodeNumber", String(episodeNumber));
+      if (title) formData.set("title", title);
+      if (compress) formData.set("compress", "1");
+      formData.set("video", file, file.name);
+
+      progressWrap.classList.remove("hidden");
+      setProgress(progressBar, percent, bytes, 0, file.size);
+      message.textContent = compress ? "Uploading (will compress)..." : "Uploading...";
+
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/series/${seriesId}/episodes`);
+      if (token) {
+        xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      }
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          setProgress(progressBar, percent, bytes, event.loaded, event.total);
+        }
+      };
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText || "{}");
+            const summary = compressionSummary(data.compression);
+            message.textContent = summary ? `Uploaded. ${summary}` : "Uploaded.";
+            resolve(data);
+          } catch {
+            message.textContent = "Uploaded.";
+            resolve({});
+          }
+          return;
+        }
+
+        try {
+          const data = JSON.parse(xhr.responseText || "{}");
+          reject(new Error(data.message || "Upload failed."));
+        } catch {
+          reject(new Error("Upload failed."));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error("Upload failed. Check your connection."));
+      xhr.send(formData);
+    });
+  }
+
+  function renderBulkList() {
+    bulkList.innerHTML = "";
+    if (!bulkItems.length) {
+      bulkUploadBtn.disabled = true;
+      bulkClearBtn.disabled = true;
+      return;
+    }
+
+    bulkUploadBtn.disabled = false;
+    bulkClearBtn.disabled = false;
+
+    bulkItems.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "bulk-row";
+
+      const epInput = document.createElement("input");
+      epInput.className = "input mini-input";
+      epInput.type = "number";
+      epInput.min = "1";
+      epInput.value = String(item.episodeNumber || 1);
+
+      const titleInput = document.createElement("input");
+      titleInput.className = "input";
+      titleInput.type = "text";
+      titleInput.value = item.title || "";
+      titleInput.placeholder = `Episode ${item.episodeNumber || 1} title`;
+
+      const meta = document.createElement("div");
+      meta.className = "movie-meta";
+      meta.textContent = `${item.file.name} (${formatBytesCompact(item.file.size)})`;
+
+      const progressWrap = document.createElement("div");
+      progressWrap.className = "progress hidden";
+      const progressBar = document.createElement("div");
+      progressBar.className = "progress-bar";
+      progressWrap.appendChild(progressBar);
+
+      const stats = document.createElement("div");
+      stats.className = "upload-stats";
+      const percent = document.createElement("span");
+      percent.textContent = "0%";
+      const bytes = document.createElement("span");
+      bytes.textContent = "0 MB / 0 MB";
+      stats.append(percent, bytes);
+
+      const message = document.createElement("div");
+      message.className = "movie-meta";
+
+      item.refs = { epInput, titleInput, progressWrap, progressBar, percent, bytes, message };
+
+      epInput.addEventListener("input", () => {
+        item.episodeNumber = Number(epInput.value || 1);
+        titleInput.placeholder = `Episode ${item.episodeNumber || 1} title`;
+      });
+
+      titleInput.addEventListener("input", () => {
+        item.title = titleInput.value;
+      });
+
+      row.append(epInput, titleInput, meta, progressWrap, stats, message);
+      bulkList.appendChild(row);
+    });
+  }
+
+  bulkPickBtn.addEventListener("click", () => bulkInput.click());
+
+  bulkClearBtn.addEventListener("click", () => {
+    if (bulkUploading) return;
+    bulkItems = [];
+    bulkInput.value = "";
+    bulkList.innerHTML = "";
+    setBulkMessage("");
+    renderBulkList();
+  });
+
+  bulkInput.addEventListener("change", () => {
+    if (bulkUploading) return;
+    setBulkMessage("");
+    const files = Array.from(bulkInput.files || []).filter((file) => isPlayable(file.name));
+    if (!files.length) {
+      bulkItems = [];
+      setBulkMessage("Select at least one MP4, WebM, MOV, or MKV file.");
+      renderBulkList();
+      return;
+    }
+
+    const withHints = files.map((file, index) => {
+      const guessedEpisode = guessEpisodeNumberFromName(file.name, seasonNumber);
+      const guessedTitle = guessEpisodeTitleFromName(file.name, series.title);
+      return {
+        file,
+        episodeNumber: guessedEpisode || index + 1,
+        title: guessedTitle || `Episode ${guessedEpisode || index + 1}`,
+        refs: null
+      };
+    });
+
+    withHints.sort((a, b) => {
+      const an = Number(a.episodeNumber || 0);
+      const bn = Number(b.episodeNumber || 0);
+      if (an && bn && an !== bn) return an - bn;
+      return a.file.name.localeCompare(b.file.name);
+    });
+
+    bulkItems = withHints;
+    renderBulkList();
+  });
+
+  bulkUploadBtn.addEventListener("click", async () => {
+    if (bulkUploading) return;
+    if (!bulkItems.length) return;
+
+    if (!ffmpegAvailable) {
+      const hasMkv = bulkItems.some((item) => String(item.file.name).toLowerCase().endsWith(".mkv"));
+      if (hasMkv) {
+        setBulkMessage("FFmpeg is required to convert MKV files on the server. Install it first.");
+        if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
+        return;
+      }
+    }
+
+    bulkUploading = true;
+    bulkUploadBtn.disabled = true;
+    bulkPickBtn.disabled = true;
+    bulkClearBtn.disabled = true;
+    setBulkMessage("Uploading episodes...");
+
+    const compress = Boolean(bulkCompress.checked);
+    const sorted = bulkItems
+      .slice()
+      .sort((a, b) => Number(a.episodeNumber || 0) - Number(b.episodeNumber || 0));
+
+    try {
+      for (const item of sorted) {
+        const refs = item.refs;
+        if (!refs) continue;
+        await uploadEpisodeFromFile({
+          seriesId: series._id,
+          seasonNumber,
+          episodeNumber: Number(item.episodeNumber || 1),
+          title: String(item.title || "").trim(),
+          file: item.file,
+          progressWrap: refs.progressWrap,
+          progressBar: refs.progressBar,
+          percent: refs.percent,
+          bytes: refs.bytes,
+          message: refs.message,
+          compress
+        });
+      }
+
+      setBulkMessage("Season upload complete.");
+      await loadEpisodes(series._id);
+    } catch (err) {
+      setBulkMessage(err.message || "Season upload failed.");
+    } finally {
+      bulkUploading = false;
+      bulkUploadBtn.disabled = false;
+      bulkPickBtn.disabled = false;
+      bulkClearBtn.disabled = false;
+    }
+  });
 
   function createEpisodeSlot(episodeNumber) {
     const form = document.createElement("form");
@@ -147,6 +508,14 @@ function buildSeasonPanel(series, seasonNumber) {
     fileInput.accept = "video/mp4,video/webm,video/quicktime,video/x-matroska";
     fileInput.required = true;
 
+    const compressLabel = document.createElement("label");
+    compressLabel.className = "check-row";
+    const compress = document.createElement("input");
+    compress.type = "checkbox";
+    compress.name = "compress";
+    compress.value = "1";
+    compressLabel.append(compress, " Compress");
+
     const button = document.createElement("button");
     button.className = "btn small";
     button.type = "submit";
@@ -171,7 +540,7 @@ function buildSeasonPanel(series, seasonNumber) {
 
     const fields = document.createElement("div");
     fields.className = "slot-fields";
-    fields.append(titleInput, fileInput, button);
+    fields.append(titleInput, fileInput, compressLabel, button);
 
     form.append(episodeInput, label, fields, progressWrap, stats, message);
 
@@ -277,7 +646,13 @@ async function handleEpisodeUpload(
     if (xhr.status >= 200 && xhr.status < 300) {
       form.reset();
       setProgress(progressBar, percent, bytes, 0, 0);
-      message.textContent = "Episode uploaded and seeding.";
+      try {
+        const data = JSON.parse(xhr.responseText || "{}");
+        const summary = compressionSummary(data.compression);
+        message.textContent = summary ? `Episode uploaded. ${summary}` : "Episode uploaded.";
+      } catch {
+        message.textContent = "Episode uploaded.";
+      }
       await loadEpisodes(seriesId);
     } else {
       const card = form.closest(".series-card");
@@ -420,8 +795,52 @@ async function loadEpisodes(seriesId) {
       }
       items.forEach((episode) => {
         const row = document.createElement("div");
-        row.className = "episode-row";
-        row.textContent = `Episode ${episode.episodeNumber || 0}: ${episode.title}`;
+        row.className = "episode-row editable";
+
+        const label = document.createElement("div");
+        label.className = "episode-label";
+        label.textContent = `Ep ${episode.episodeNumber || 0}`;
+
+        const numberInput = document.createElement("input");
+        numberInput.className = "input mini-input";
+        numberInput.type = "number";
+        numberInput.min = "1";
+        numberInput.value = String(episode.episodeNumber || 1);
+
+        const titleInput = document.createElement("input");
+        titleInput.className = "input";
+        titleInput.value = episode.title || "";
+
+        const saveBtn = document.createElement("button");
+        saveBtn.className = "btn ghost small";
+        saveBtn.type = "button";
+        saveBtn.textContent = "Save";
+
+        const status = document.createElement("div");
+        status.className = "movie-meta";
+
+        saveBtn.addEventListener("click", async () => {
+          status.textContent = "";
+          saveBtn.disabled = true;
+          try {
+            await apiFetch(`/movies/${episode._id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                title: titleInput.value,
+                episodeNumber: Number(numberInput.value || 0)
+              })
+            });
+            status.textContent = "Saved.";
+            await loadEpisodes(seriesId);
+          } catch (err) {
+            status.textContent = err.message || "Save failed.";
+          } finally {
+            saveBtn.disabled = false;
+          }
+        });
+
+        row.append(label, numberInput, titleInput, saveBtn, status);
         list.appendChild(row);
       });
     });
@@ -495,7 +914,13 @@ uploadForm.addEventListener("submit", async (e) => {
       form.reset();
       uploadFileInfo.textContent = "No file selected.";
       setProgress(uploadProgressBar, uploadPercent, uploadBytes, 0, 0);
-      uploadMessage.textContent = "Upload complete. Seeding now.";
+      try {
+        const data = JSON.parse(xhr.responseText || "{}");
+        const summary = compressionSummary(data.compression);
+        uploadMessage.textContent = summary ? `Upload complete. ${summary}` : "Upload complete.";
+      } catch {
+        uploadMessage.textContent = "Upload complete.";
+      }
     } else {
       try {
         const data = JSON.parse(xhr.responseText || "{}");
