@@ -44,7 +44,22 @@ if (!fs.existsSync(headersDir)) {
   fs.mkdirSync(headersDir, { recursive: true });
 }
 
-app.use(express.static(publicDir));
+app.use(
+  express.static(publicDir, {
+    // Prevent stale JS/HTML after a deploy so users don't need Ctrl+F5.
+    setHeaders(res, filePath) {
+      const lower = String(filePath || "").toLowerCase();
+      if (lower.endsWith(".html")) {
+        res.setHeader("Cache-Control", "no-store");
+        return;
+      }
+      if (lower.endsWith(".js") || lower.endsWith(".css") || lower.endsWith(".json")) {
+        // Allow caching but force revalidation.
+        res.setHeader("Cache-Control", "no-cache");
+      }
+    }
+  })
+);
 
 app.get("/headers/*", async (req, res, next) => {
   if (!isR2Enabled()) return next();

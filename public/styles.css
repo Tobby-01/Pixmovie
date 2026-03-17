@@ -605,6 +605,10 @@ body {
   grid-column: 1 / -1;
 }
 
+.bulk-rename.hidden {
+  display: none;
+}
+
 .mini-input {
   width: 110px;
 }

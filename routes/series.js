@@ -6,7 +6,7 @@ const auth = require("../server/middleware/auth");
 const Series = require("../models/Series");
 const Movie = require("../models/Movie");
 const User = require("../models/User");
-const { transcodeToMp4 } = require("../server/transcode");
+const { transcodeToMp4, isFfmpegAvailable } = require("../server/transcode");
 const {
   isR2Enabled,
   uploadLocalFile,
@@ -75,19 +75,8 @@ const seriesHeaderUpload = multer({
   }
 });
 
-const allowedExtensions = new Set([
-  ".mp4",
-  ".webm",
-  ".mov",
-  ".mkv",
-  ".avi",
-  ".m4v",
-  ".mpg",
-  ".mpeg",
-  ".wmv",
-  ".ts"
-]);
-const playableExtensions = new Set([".mp4", ".webm", ".mov"]);
+const allowedExtensions = new Set([".mp4"]);
+const playableExtensions = new Set([".mp4"]);
 
 function isPlayableFile(fileName) {
   return playableExtensions.has(path.extname(fileName).toLowerCase());
@@ -246,8 +235,7 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
       return res
         .status(400)
         .json({
-          message:
-            "Unsupported format. Use MP4, WebM, MOV, MKV, AVI, M4V, MPG, MPEG, WMV, or TS."
+          message: "Unsupported format. Use MP4."
         });
     }
 
@@ -264,6 +252,12 @@ router.post("/:id/episodes", auth, episodeUpload.single("video"), async (req, re
     }
 
     const compressRequested = String(req.body.compress || "") === "1";
+    if (compressRequested && !isFfmpegAvailable()) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({
+        message: "FFmpeg is not available on this server. Compression is disabled."
+      });
+    }
     const title = String(req.body.title || "").trim() || `Episode ${episodeNumber}`;
     const inputBytes = Number(req.file.size || 0);
 

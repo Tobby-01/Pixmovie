@@ -37,7 +37,7 @@ function compressionSummary(compression) {
   return `Compressed ${formatBytesCompact(original)} -> ${formatBytesCompact(finalBytes)} (${savedPercent}% smaller).`;
 }
 
-const allowedExtensions = [".mp4", ".webm", ".mov", ".mkv"];
+const allowedExtensions = [".mp4"];
 
 function isPlayable(fileName) {
   const lower = String(fileName || "").toLowerCase();
@@ -133,9 +133,6 @@ async function checkFfmpeg() {
   try {
     const data = await apiFetch("/system/ffmpeg");
     ffmpegAvailable = Boolean(data.available);
-    if (!ffmpegAvailable && ffmpegBanner) {
-      ffmpegBanner.classList.remove("hidden");
-    }
   } catch (err) {
     // Ignore check failures
   }
@@ -218,7 +215,7 @@ function buildSeasonPanel(series, seasonNumber) {
   const bulkInput = document.createElement("input");
   bulkInput.type = "file";
   bulkInput.multiple = true;
-  bulkInput.accept = "video/mp4,video/webm,video/quicktime,video/x-matroska";
+  bulkInput.accept = "video/mp4";
   bulkInput.className = "hidden";
 
   const bulkList = document.createElement("div");
@@ -270,7 +267,7 @@ function buildSeasonPanel(series, seasonNumber) {
       const formData = new FormData();
       formData.set("seasonNumber", String(seasonNumber));
       formData.set("episodeNumber", String(episodeNumber));
-      if (title) formData.set("title", title);
+      // Title is set after the full season upload (rename step).
       if (compress) formData.set("compress", "1");
       formData.set("video", file, file.name);
 
@@ -398,7 +395,7 @@ function buildSeasonPanel(series, seasonNumber) {
     const files = Array.from(bulkInput.files || []).filter((file) => isPlayable(file.name));
     if (!files.length) {
       bulkItems = [];
-      setBulkMessage("Select at least one MP4, WebM, MOV, or MKV file.");
+      setBulkMessage("Select at least one MP4 file.");
       renderBulkList();
       return;
     }
@@ -409,7 +406,7 @@ function buildSeasonPanel(series, seasonNumber) {
       return {
         file,
         episodeNumber: guessedEpisode || index + 1,
-        title: guessedTitle || `Episode ${guessedEpisode || index + 1}`,
+        title: guessedTitle || "",
         refs: null
       };
     });
@@ -425,17 +422,92 @@ function buildSeasonPanel(series, seasonNumber) {
     renderBulkList();
   });
 
+  const bulkRenamePanel = document.createElement("div");
+  bulkRenamePanel.className = "bulk-rename hidden";
+  const bulkRenameTitle = document.createElement("div");
+  bulkRenameTitle.className = "bulk-title";
+  bulkRenameTitle.textContent = "Name your episodes";
+  const bulkRenameHelp = document.createElement("div");
+  bulkRenameHelp.className = "movie-meta";
+  bulkRenameHelp.textContent =
+    "Uploads are done. Edit episode titles below and save. You can always change them later in the episode list too.";
+  const bulkRenameList = document.createElement("div");
+  bulkRenameList.className = "bulk-list";
+  const bulkRenameActions = document.createElement("div");
+  bulkRenameActions.className = "bulk-actions";
+  const bulkRenameSaveAll = document.createElement("button");
+  bulkRenameSaveAll.className = "btn small";
+  bulkRenameSaveAll.type = "button";
+  bulkRenameSaveAll.textContent = "Save All";
+  const bulkRenameStatus = document.createElement("div");
+  bulkRenameStatus.className = "movie-meta";
+  bulkRenameActions.append(bulkRenameSaveAll, bulkRenameStatus);
+  bulkRenamePanel.append(
+    bulkRenameTitle,
+    bulkRenameHelp,
+    bulkRenameList,
+    bulkRenameActions
+  );
+  bulkPanel.appendChild(bulkRenamePanel);
+
+  function showRenamePanel(uploaded) {
+    bulkRenameList.innerHTML = "";
+    bulkRenameStatus.textContent = "";
+    if (!Array.isArray(uploaded) || !uploaded.length) return;
+
+    const rows = uploaded.map((item) => {
+      const row = document.createElement("div");
+      row.className = "bulk-row";
+
+      const label = document.createElement("div");
+      label.className = "episode-label";
+      label.textContent = `Ep ${item.episodeNumber}`;
+
+      const titleInput = document.createElement("input");
+      titleInput.className = "input";
+      titleInput.type = "text";
+      titleInput.value = item.suggestedTitle || item.title || `Episode ${item.episodeNumber}`;
+
+      const meta = document.createElement("div");
+      meta.className = "movie-meta";
+      meta.textContent = item.fileName || "";
+
+      row.append(label, titleInput, meta);
+      bulkRenameList.appendChild(row);
+      return { movieId: item.movieId, titleInput };
+    });
+
+    bulkRenamePanel.classList.remove("hidden");
+
+    bulkRenameSaveAll.onclick = async () => {
+      bulkRenameSaveAll.disabled = true;
+      bulkRenameStatus.textContent = "Saving...";
+      try {
+        for (const r of rows) {
+          await apiFetch(`/movies/${r.movieId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: r.titleInput.value })
+          });
+        }
+        bulkRenameStatus.textContent = "Saved.";
+        await loadEpisodes(series._id);
+      } catch (err) {
+        bulkRenameStatus.textContent = err.message || "Save failed.";
+      } finally {
+        bulkRenameSaveAll.disabled = false;
+      }
+    };
+  }
+
   bulkUploadBtn.addEventListener("click", async () => {
     if (bulkUploading) return;
     if (!bulkItems.length) return;
 
-    if (!ffmpegAvailable) {
-      const hasMkv = bulkItems.some((item) => String(item.file.name).toLowerCase().endsWith(".mkv"));
-      if (hasMkv) {
-        setBulkMessage("FFmpeg is required to convert MKV files on the server. Install it first.");
-        if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
-        return;
-      }
+    if (bulkCompress.checked && !ffmpegAvailable) {
+      setBulkMessage("FFmpeg is required for compression. Turn off Compress or install FFmpeg.");
+      if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
+      return;
     }
 
     bulkUploading = true;
@@ -450,14 +522,15 @@ function buildSeasonPanel(series, seasonNumber) {
       .sort((a, b) => Number(a.episodeNumber || 0) - Number(b.episodeNumber || 0));
 
     try {
+      const uploaded = [];
       for (const item of sorted) {
         const refs = item.refs;
         if (!refs) continue;
-        await uploadEpisodeFromFile({
+        const result = await uploadEpisodeFromFile({
           seriesId: series._id,
           seasonNumber,
           episodeNumber: Number(item.episodeNumber || 1),
-          title: String(item.title || "").trim(),
+          title: "",
           file: item.file,
           progressWrap: refs.progressWrap,
           progressBar: refs.progressBar,
@@ -466,10 +539,20 @@ function buildSeasonPanel(series, seasonNumber) {
           message: refs.message,
           compress
         });
+
+        if (result && result._id) {
+          uploaded.push({
+            movieId: result._id,
+            episodeNumber: Number(result.episodeNumber || item.episodeNumber || 1),
+            fileName: item.file.name,
+            suggestedTitle: item.title
+          });
+        }
       }
 
       setBulkMessage("Season upload complete.");
       await loadEpisodes(series._id);
+      showRenamePanel(uploaded);
     } catch (err) {
       setBulkMessage(err.message || "Season upload failed.");
     } finally {
@@ -505,7 +588,7 @@ function buildSeasonPanel(series, seasonNumber) {
     fileInput.className = "input";
     fileInput.name = "video";
     fileInput.type = "file";
-    fileInput.accept = "video/mp4,video/webm,video/quicktime,video/x-matroska";
+    fileInput.accept = "video/mp4";
     fileInput.required = true;
 
     const compressLabel = document.createElement("label");
@@ -614,8 +697,9 @@ async function handleEpisodeUpload(
     message.textContent = "Unsupported format. Use MP4, WebM, MOV, or MKV.";
     return;
   }
-  if (!ffmpegAvailable && file.name.toLowerCase().endsWith(".mkv")) {
-    message.textContent = "FFmpeg is required to convert MKV. Install it first.";
+  const compressRequested = form.querySelector('input[type="checkbox"][name="compress"]')?.checked;
+  if (compressRequested && !ffmpegAvailable) {
+    message.textContent = "FFmpeg is required for compression. Turn off Compress or install FFmpeg.";
     if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
     return;
   }
@@ -882,8 +966,9 @@ uploadForm.addEventListener("submit", async (e) => {
     uploadMessage.textContent = "Unsupported format. Use MP4, WebM, MOV, or MKV.";
     return;
   }
-  if (!ffmpegAvailable && file.name.toLowerCase().endsWith(".mkv")) {
-    uploadMessage.textContent = "FFmpeg is required to convert MKV. Install it first.";
+  const compressRequested = form.querySelector('input[type="checkbox"][name="compress"]')?.checked;
+  if (compressRequested && !ffmpegAvailable) {
+    uploadMessage.textContent = "FFmpeg is required for compression. Turn off Compress or install FFmpeg.";
     if (ffmpegBanner) ffmpegBanner.classList.remove("hidden");
     return;
   }

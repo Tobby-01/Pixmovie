@@ -40,7 +40,7 @@
         </div>
       </section>
       <div id="ffmpegBanner" class="series-alert hidden">
-        FFmpeg is not installed on this server. MKV and other non-browser formats will not play.
+        FFmpeg is not installed on this server. Compression is disabled.
         Install with `winget install Gyan.FFmpeg`, then restart the server.
       </div>
 
@@ -86,7 +86,7 @@
             class="input"
             type="file"
             name="video"
-            accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+            accept="video/mp4"
             required
           />
           <label class="check-row">
